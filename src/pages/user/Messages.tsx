@@ -11,15 +11,15 @@ import {
   Select,
   StatusBadge,
   TextArea,
+  TypeBadge,
 } from '../../components/ui';
-import { DISTRICTS } from '../../constants/domain';
-import { calculateTransactionFee } from '../../utils/credit';
+import { feeText } from '../../utils/credit';
 import { progressIndex } from '../../utils/transaction';
 import type { AppDispatch } from '../../app/store';
 import type { Handover, Item, Transaction } from '../../types/domain';
 import { fileToDataUrl } from '../../utils/files';
 
-const steps = ['Trao đổi', 'Đề xuất lịch', 'Chốt lịch', 'Giữ phí', 'Bàn giao'];
+const steps = ['Trao doi', 'De xuat lich', 'Chot lich', 'Giu phi', 'Ban giao', 'Hoan tat'];
 export function Messages() {
   const data = useAppSelector(selectData);
   const user = useAppSelector(selectCurrentUser)!;
@@ -31,6 +31,7 @@ export function Messages() {
   const [mobileChat, setMobileChat] = useState(false);
   const [message, setMessage] = useState('');
   const [showSchedule, setShowSchedule] = useState(false);
+  const [showComplaint, setShowComplaint] = useState(false);
   const [showContext, setShowContext] = useState(true);
   const [date, setDate] = useState('2026-09-28');
   const [time, setTime] = useState('18:30');
@@ -39,9 +40,20 @@ export function Messages() {
   const [address, setAddress] = useState('');
   const [note, setNote] = useState('');
   const [evidence, setEvidence] = useState<string[]>([]);
+  const [complaintReason, setComplaintReason] = useState('');
+  const [complaintContent, setComplaintContent] = useState('');
+  const [complaintEvidence, setComplaintEvidence] = useState<string[]>([]);
+  const districts = data.districts
+    .filter((entry) => entry.status === 'active')
+    .map((entry) => entry.name);
   const conv = conversations.find((c) => c.id === selectedId);
   const tx = data.transactions.find((t) => t.id === conv?.transactionId);
   const item = data.items.find((i) => i.id === conv?.itemId);
+  const sourceItem = tx?.sourceItemId
+    ? data.items.find((entry) => entry.id === tx.sourceItemId)
+    : undefined;
+  const owner = data.users.find((entry) => entry.id === tx?.ownerId);
+  const requester = data.users.find((entry) => entry.id === tx?.requesterId);
   const other = data.users.find((u) => u.id === conv?.participantIds.find((id) => id !== user.id));
   const messages = useMemo(
     () => data.messages.filter((m) => m.convId === selectedId),
@@ -78,6 +90,22 @@ export function Messages() {
     dispatch(actions.confirmTransactionSide({ transactionId: tx.id, userId: user.id, evidence }));
     setEvidence([]);
   };
+  const submitComplaint = () => {
+    if (!tx) return;
+    dispatch(
+      actions.createComplaint({
+        transactionId: tx.id,
+        reporterId: user.id,
+        reason: complaintReason,
+        content: complaintContent,
+        evidence: complaintEvidence,
+      }),
+    );
+    setComplaintReason('');
+    setComplaintContent('');
+    setComplaintEvidence([]);
+    setShowComplaint(false);
+  };
   return (
     <div className="page-shell py-5 sm:py-7">
       <div className="overflow-hidden rounded-xl bg-white shadow-md ring-1 ring-border/80 lg:grid lg:h-[calc(100dvh-140px)] lg:min-h-[680px] lg:grid-cols-[330px_1fr]">
@@ -88,6 +116,7 @@ export function Messages() {
           </div>
           <div className="max-h-[calc(100dvh-210px)] overflow-y-auto">
             {conversations.map((c) => {
+              const cTx = data.transactions.find((t) => t.id === c.transactionId);
               const txItem = data.items.find((i) => i.id === c.itemId);
               const participant = data.users.find(
                 (u) => u.id === c.participantIds.find((id) => id !== user.id),
@@ -109,9 +138,12 @@ export function Messages() {
                         {new Date(c.lastMessageAt).toLocaleDateString('vi-VN')}
                       </span>
                     </div>
-                    <p className="mt-1 truncate text-xs font-medium text-primary">
-                      {txItem?.title}
-                    </p>
+                    <div className="mt-1 flex min-w-0 items-center gap-2">
+                      {cTx || txItem ? <TypeBadge type={cTx?.type ?? txItem!.type} /> : null}
+                      <span className="truncate text-xs font-medium text-primary">
+                        {txItem?.title}
+                      </span>
+                    </div>
                     <p className="mt-1 truncate text-xs text-text-muted">{c.lastMessage}</p>
                   </div>
                 </button>
@@ -133,7 +165,10 @@ export function Messages() {
               {other ? <Avatar user={other} /> : null}
               <div className="min-w-0 flex-1">
                 <h2 className="truncate text-sm font-bold">{other?.name ?? 'Cuộc trò chuyện'}</h2>
-                <p className="truncate text-xs text-text-muted">{item.title}</p>
+                <div className="mt-1 flex min-w-0 items-center gap-2">
+                  <TypeBadge type={tx.type} />
+                  <span className="truncate text-xs text-text-muted">{item.title}</span>
+                </div>
               </div>
               <StatusBadge status={tx.status} />
             </header>
@@ -151,7 +186,7 @@ export function Messages() {
                   <span className="min-w-0">
                     <strong className="block truncate text-sm">Thông tin giao dịch</strong>
                     <span className="text-xs text-text-muted">
-                      {calculateTransactionFee(tx, user.id, data)} Credit phí của bạn
+                      {feeText(tx, user.id)}
                     </span>
                   </span>
                 </span>
@@ -164,10 +199,16 @@ export function Messages() {
                 <TransactionContext
                   tx={tx}
                   item={item}
+                  sourceItem={sourceItem}
+                  ownerName={owner?.name}
+                  requesterName={requester?.name}
+                  partnerEmail={other?.email}
+                  partnerPhone={other?.phone}
                   userId={user.id}
                   handover={handover}
                   dispatch={dispatch}
                   onSchedule={() => setShowSchedule(true)}
+                  onComplaint={() => setShowComplaint(true)}
                   evidence={evidence}
                   setEvidence={setEvidence}
                   onConfirm={confirmHandover}
@@ -274,7 +315,7 @@ export function Messages() {
                 <option>Giao hàng</option>
               </Select>
               <Select label="Quận" value={district} onChange={(e) => setDistrict(e.target.value)}>
-                {DISTRICTS.map((d) => (
+                {districts.map((d) => (
                   <option key={d}>{d}</option>
                 ))}
               </Select>
@@ -301,6 +342,73 @@ export function Messages() {
           </div>
         </div>
       ) : null}
+      {showComplaint && tx ? (
+        <div
+          className="fixed inset-0 z-40 grid place-items-end bg-black/30 p-0 sm:place-items-center sm:p-4"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="max-h-[92dvh] w-full overflow-y-auto rounded-t-xl bg-white p-5 shadow-lg sm:max-w-lg sm:rounded-xl sm:p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-bold">Gửi khiếu nại</h2>
+                <p className="mt-1 text-sm text-text-muted">
+                  Khiếu nại sẽ được chuyển đến quản trị viên để xử lý theo giao dịch {tx.id}.
+                </p>
+              </div>
+              <IconButton icon="close" label="Đóng" onClick={() => setShowComplaint(false)} />
+            </div>
+            <Field
+              className="mt-5"
+              label="Lý do"
+              value={complaintReason}
+              onChange={(event) => setComplaintReason(event.target.value)}
+            />
+            <TextArea
+              className="mt-4"
+              label="Nội dung"
+              value={complaintContent}
+              onChange={(event) => setComplaintContent(event.target.value)}
+            />
+            <label className="mt-4 inline-flex cursor-pointer items-center gap-2 rounded-md border border-border bg-white px-3 py-2 text-sm font-semibold text-text-secondary hover:border-primary">
+              <Icon name="image" className="size-4" />
+              Thêm ảnh/video minh chứng
+              <input
+                className="hidden"
+                type="file"
+                accept="image/*,video/*"
+                multiple
+                onChange={async (event) => {
+                  const files = Array.from(event.target.files ?? []);
+                  setComplaintEvidence([
+                    ...complaintEvidence,
+                    ...(await Promise.all(files.map(fileToDataUrl))),
+                  ]);
+                }}
+              />
+            </label>
+            {complaintEvidence.length ? (
+              <div className="mt-3 grid grid-cols-4 gap-2">
+                {complaintEvidence.map((source, index) => (
+                  <span key={source.slice(-16) + index} className="block aspect-square overflow-hidden rounded-md bg-surface-low">
+                    {source.startsWith('data:video') ? (
+                      <video src={source} className="size-full object-cover" />
+                    ) : (
+                      <img src={source} alt="Minh chứng" className="size-full object-cover" />
+                    )}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            <div className="mt-6 flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => setShowComplaint(false)}>
+                Hủy
+              </Button>
+              <Button onClick={submitComplaint}>Gửi khiếu nại</Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -308,10 +416,16 @@ export function Messages() {
 type ContextProps = {
   tx: Transaction;
   item: Item;
+  sourceItem?: Item;
+  ownerName?: string;
+  requesterName?: string;
+  partnerEmail?: string;
+  partnerPhone?: string;
   userId: string;
   handover: Handover | undefined;
   dispatch: AppDispatch;
   onSchedule: () => void;
+  onComplaint: () => void;
   evidence: string[];
   setEvidence: Dispatch<SetStateAction<string[]>>;
   onConfirm: () => void;
@@ -319,21 +433,28 @@ type ContextProps = {
 function TransactionContext({
   tx,
   item,
+  sourceItem,
+  ownerName,
+  requesterName,
+  partnerEmail,
+  partnerPhone,
   userId,
   handover,
   dispatch,
   onSchedule,
+  onComplaint,
   evidence,
   setEvidence,
   onConfirm,
 }: ContextProps) {
-  void item;
   const index = progressIndex(tx.status);
   const isOwner = userId === tx.ownerId;
   const terminal = ['COMPLETED', 'CANCELLED', 'DISPUTED'].includes(tx.status);
+  const targetLabel = isOwner ? 'Món của bạn' : 'Món của đối phương';
+  const sourceLabel = isOwner ? 'Món của đối phương' : 'Món của bạn';
   return (
     <div className="border-t border-border px-4 pb-4 pt-3 sm:px-5">
-      <div className="grid grid-cols-5 gap-1">
+      <div className="grid grid-cols-6 gap-1">
         {steps.map((step, i) => (
           <div key={step} className="min-w-0">
             <div className={`h-1 rounded-full ${i <= index ? 'bg-primary' : 'bg-surface-high'}`} />
@@ -342,6 +463,38 @@ function TransactionContext({
             </span>
           </div>
         ))}
+      </div>
+      <div className="mt-3 rounded-md bg-white p-3 text-xs ring-1 ring-border/70">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="font-semibold text-text-secondary">Hình thức</span>
+          <TypeBadge type={tx.type} />
+        </div>
+        {tx.type === 'trade' ? (
+          <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto_1fr] sm:items-center">
+            <TransactionItemSummary label={targetLabel} item={item} />
+            {sourceItem ? (
+              <>
+                <span className="hidden text-center text-text-muted sm:block">↔</span>
+                <TransactionItemSummary label={sourceLabel} item={sourceItem} />
+              </>
+            ) : null}
+          </div>
+        ) : (
+          <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
+            <TransactionItemSummary label="Món được cho" item={item} />
+            <div className="rounded-md bg-background p-3">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-text-muted">
+                Người tham gia
+              </p>
+              <p className="mt-2 truncate text-sm font-semibold text-text-primary">
+                Người cho: {ownerName ?? 'Thành viên'}
+              </p>
+              <p className="mt-1 truncate text-sm font-semibold text-text-primary">
+                Người nhận: {requesterName ?? 'Thành viên'}
+              </p>
+            </div>
+          </div>
+        )}
       </div>
       {handover ? (
         <div className="mt-3 flex flex-col gap-2 rounded-md bg-white p-3 text-xs ring-1 ring-border/70 sm:flex-row sm:items-center sm:justify-between">
@@ -367,29 +520,36 @@ function TransactionContext({
           )}
         </div>
       ) : null}
+      {tx.creditHeld && handover ? (
+        <div className="mt-3 rounded-md bg-emerald-50 p-3 text-xs text-success ring-1 ring-emerald-100">
+          <p className="font-bold">Thong tin lien he da mo khoa</p>
+          <p className="mt-1">Email: {partnerEmail ?? 'Chua cap nhat'}</p>
+          <p>So dien thoai: {partnerPhone ?? 'Chua cap nhat'}</p>
+          <p>
+            Thoi gian: {handover.date} {handover.time}
+          </p>
+          <p>
+            Dia diem: {handover.address}, {handover.district}
+          </p>
+        </div>
+      ) : null}
       <div className="mt-3 flex flex-wrap gap-2">
         {!terminal ? (
           <>
             <Button size="sm" variant="outline" icon="calendar" onClick={onSchedule}>
               {handover ? 'Đề xuất lịch khác' : 'Chốt lịch giao nhận'}
             </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              icon="wallet"
-              disabled={
-                tx.creditHeldBy.includes(userId) ||
-                tx.status === 'NEGOTIATING' ||
-                tx.status === 'SCHEDULE_PROPOSED'
-              }
-              onClick={() => dispatch(actions.holdTransactionFee({ transactionId: tx.id, userId }))}
-            >
-              {tx.creditHeldBy.includes(userId) ? 'Đã giữ phí' : 'Xác nhận giữ phí'}
-            </Button>
           </>
         ) : null}
+        {tx.status === 'COMPLETED' &&
+        tx.complaintDeadline &&
+        Date.now() <= new Date(tx.complaintDeadline).getTime() ? (
+          <Button size="sm" variant="outline" icon="shield" onClick={onComplaint}>
+            Gửi khiếu nại
+          </Button>
+        ) : null}
       </div>
-      {tx.creditHeldBy.includes(userId) && !terminal ? (
+      {tx.creditHeld && !terminal ? (
         <div className="mt-3 rounded-md border border-dashed border-border p-3">
           <p className="text-xs font-semibold">
             {isOwner ? 'Xác nhận đã giao đồ' : 'Xác nhận đã nhận đồ'}
@@ -442,6 +602,21 @@ function TransactionContext({
           </div>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function TransactionItemSummary({ label, item }: { label: string; item: Item }) {
+  return (
+    <div className="flex min-w-0 items-center gap-3 rounded-md bg-background p-3">
+      <img src={item.images[0]} alt="" className="size-12 shrink-0 rounded-md object-cover" />
+      <div className="min-w-0">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-text-muted">
+          {label}
+        </p>
+        <p className="mt-1 truncate text-sm font-bold text-text-primary">{item.title}</p>
+        <p className="mt-0.5 truncate text-xs text-text-muted">{item.district}</p>
+      </div>
     </div>
   );
 }

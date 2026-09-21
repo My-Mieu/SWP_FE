@@ -1,16 +1,20 @@
 import { type FormEvent, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../../app/hooks';
-import { actions, selectCurrentUser } from '../../app/store';
+import { actions, selectCurrentUser, selectData } from '../../app/store';
 import { Button, Field, Icon, PageHeader, Select, TextArea } from '../../components/ui';
-import { CATEGORIES, CONDITIONS, DISTRICTS } from '../../constants/domain';
+import { CATEGORIES, CONDITIONS } from '../../constants/domain';
 import { conditionLabel } from '../../utils/formatting';
 import type { ItemCondition, ItemType } from '../../types/domain';
 import { fileToDataUrl } from '../../utils/files';
 export function Post() {
   const user = useAppSelector(selectCurrentUser)!;
+  const data = useAppSelector(selectData);
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
+  const districts = data.districts
+    .filter((entry) => entry.status === 'active')
+    .map((entry) => entry.name);
   const [type, setType] = useState<ItemType>('gift');
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState<string>(CATEGORIES[0]);
@@ -103,7 +107,7 @@ export function Post() {
             value={district}
             onChange={(e) => setDistrict(e.target.value)}
           >
-            {DISTRICTS.map((d) => (
+            {districts.map((d) => (
               <option key={d}>{d}</option>
             ))}
           </Select>

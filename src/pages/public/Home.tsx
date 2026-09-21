@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAppSelector } from '../../app/hooks';
 import { selectCurrentUser, selectData } from '../../app/store';
 import {
+  Avatar,
   Button,
   ConditionBadge,
   Icon,
@@ -10,8 +11,8 @@ import {
   SearchField,
   TypeBadge,
 } from '../../components/ui';
-import { CATEGORIES, DISTRICTS } from '../../constants/domain';
-import type { Item } from '../../types/domain';
+import { CATEGORIES } from '../../constants/domain';
+import type { Item, User } from '../../types/domain';
 
 const categoryIcons = ['ai', 'home', 'article', 'user', 'box', 'activity', 'star', 'edit'];
 const popularDistricts = ['Bình Thạnh', 'Phú Nhuận', 'Quận 3', 'Quận 7', 'Tân Bình', 'TP Thủ Đức'];
@@ -72,9 +73,9 @@ function HomeSection({ children, className = '' }: { children: ReactNode; classN
   );
 }
 
-function GiftRailCard({ item }: { item: Item }) {
+function GiftRailCard({ item, owner }: { item: Item; owner?: User }) {
   return (
-    <Link to={`/product/${item.id}`} className="group w-[238px] shrink-0 sm:w-[272px] lg:w-auto">
+    <Link to={`/items/${item.id}`} className="group w-[238px] shrink-0 sm:w-[272px] lg:w-auto">
       <div className="relative aspect-[4/3] overflow-hidden rounded-lg bg-surface-container">
         <img
           src={item.images[0]}
@@ -88,18 +89,29 @@ function GiftRailCard({ item }: { item: Item }) {
       <h3 className="mt-3 line-clamp-2 text-sm font-bold leading-5 text-text-primary transition group-hover:text-primary">
         {item.title}
       </h3>
+      <p className="mt-1 line-clamp-2 text-xs leading-5 text-text-muted">{item.description}</p>
       <p className="mt-1 flex items-center gap-1 text-xs text-text-muted">
         <Icon name="location" className="size-3.5" />
         {item.district}
       </p>
+      {owner ? (
+        <p className="mt-2 flex min-w-0 items-center gap-2 text-xs font-semibold text-text-secondary">
+          <Avatar user={owner} size="sm" />
+          <span className="min-w-0 truncate">{owner.name}</span>
+        </p>
+      ) : null}
+      <span className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-primary transition group-hover:text-primary-hover">
+        Xem chi tiết
+        <Icon name="arrow" className="size-3.5" />
+      </span>
     </Link>
   );
 }
 
-function TradeCard({ item }: { item: Item }) {
+function TradeCard({ item, owner }: { item: Item; owner?: User }) {
   return (
     <Link
-      to={`/product/${item.id}`}
+      to={`/items/${item.id}`}
       className="group grid min-w-0 grid-cols-[104px_1fr] gap-4 rounded-lg bg-white p-3 ring-1 ring-border/80 transition hover:-translate-y-0.5 hover:shadow-md hover:ring-primary/20 sm:grid-cols-[132px_1fr]"
     >
       <img
@@ -115,9 +127,20 @@ function TradeCard({ item }: { item: Item }) {
         <h3 className="mt-2 line-clamp-2 text-sm font-bold leading-5 transition group-hover:text-primary sm:text-base">
           {item.title}
         </h3>
+        <p className="mt-1 line-clamp-2 text-xs leading-5 text-text-muted">{item.description}</p>
         <p className="mt-2 line-clamp-2 text-xs leading-5 text-text-muted">
           <span className="font-semibold text-text-secondary">Đang tìm:</span> {item.tradeFor}
         </p>
+        {owner ? (
+          <p className="mt-2 flex min-w-0 items-center gap-2 text-xs font-semibold text-text-secondary">
+            <Avatar user={owner} size="sm" />
+            <span className="min-w-0 truncate">{owner.name}</span>
+          </p>
+        ) : null}
+        <span className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-primary transition group-hover:text-primary-hover">
+          Xem chi tiết
+          <Icon name="arrow" className="size-3.5" />
+        </span>
       </div>
     </Link>
   );
@@ -125,6 +148,9 @@ function TradeCard({ item }: { item: Item }) {
 
 export function Home() {
   const { items, users } = useAppSelector(selectData);
+  const districtOptions = useAppSelector(selectData).districts
+    .filter((entry) => entry.status === 'active')
+    .map((entry) => entry.name);
   const currentUser = useAppSelector(selectCurrentUser);
   const navigate = useNavigate();
   const [q, setQ] = useState('');
@@ -187,7 +213,7 @@ export function Home() {
                 value={district}
                 onChange={(event) => setDistrict(event.target.value)}
               >
-                {DISTRICTS.map((name) => (
+                {districtOptions.map((name) => (
                   <option key={name}>{name}</option>
                 ))}
               </select>
@@ -214,7 +240,7 @@ export function Home() {
             {approved.slice(0, 4).map((item, index) => (
               <Link
                 key={item.id}
-                to={`/product/${item.id}`}
+                to={`/items/${item.id}`}
                 className={`group relative min-h-0 overflow-hidden rounded-lg bg-surface-container ${
                   index === 0 ? 'lg:row-span-3' : ''
                 }`}
@@ -278,7 +304,7 @@ export function Home() {
       {editorialItem ? (
         <HomeSection className="pt-12 sm:pt-16">
           <Link
-            to={`/product/${editorialItem.id}`}
+            to={`/items/${editorialItem.id}`}
             className="group grid overflow-hidden rounded-xl bg-[#183c34] text-white shadow-md md:grid-cols-[1.08fr_.92fr]"
           >
             <div className="relative min-h-[280px] overflow-hidden sm:min-h-[360px]">
@@ -324,7 +350,11 @@ export function Home() {
           />
           <div className="flex gap-4 overflow-x-auto pb-3 lg:grid lg:grid-cols-5 lg:overflow-visible lg:pb-0">
             {gifts.slice(0, 5).map((item) => (
-              <GiftRailCard key={item.id} item={item} />
+              <GiftRailCard
+                key={item.id}
+                item={item}
+                owner={users.find((user) => user.id === item.ownerId)}
+              />
             ))}
           </div>
         </HomeSection>
@@ -363,7 +393,11 @@ export function Home() {
         />
         <div className="grid gap-3 md:grid-cols-2">
           {trades.slice(0, 4).map((item) => (
-            <TradeCard key={item.id} item={item} />
+            <TradeCard
+              key={item.id}
+              item={item}
+              owner={users.find((user) => user.id === item.ownerId)}
+            />
           ))}
         </div>
       </HomeSection>
@@ -383,8 +417,7 @@ export function Home() {
               </div>
             </div>
             <p className="mt-4 max-w-2xl text-sm leading-6 text-text-secondary">
-              Thử “Tìm xe đạp mini miễn phí ở Bình Thạnh” hoặc tải ảnh món bạn muốn đổi để nhận gợi
-              ý từ các bài đăng hiện có.
+              Thử “Tìm xe đạp mini miễn phí ở Bình Thạnh” để nhận gợi ý từ các bài đăng hiện có.
             </p>
           </div>
           <div className="border-t border-primary/10 px-6 py-6 md:border-l md:border-t-0 md:px-8">

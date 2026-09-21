@@ -16,7 +16,7 @@ npm run build
 
 ## Deploy to Vercel
 
-The repository includes `vercel.json` with the SPA rewrite required by React Router. Vercel uses Node.js 22, runs `npm run build`, and publishes `dist`.
+The repository includes `vercel.json` with the SPA rewrite required by React Router. Vercel uses Node.js 24, runs `npm run build`, and publishes `dist`.
 
 ### From Git
 

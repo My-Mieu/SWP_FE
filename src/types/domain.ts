@@ -15,7 +15,16 @@ export type TransactionStatus =
   | 'CANCELLED'
   | 'DISPUTED';
 export type CreditHistoryType =
-  'TOPUP' | 'TRANSACTION_FEE' | 'AI_FEE' | 'HOLD' | 'RELEASE_HOLD' | 'REFUND' | 'ADMIN_ADJUSTMENT';
+  | 'TOPUP'
+  | 'SPEND'
+  | 'HOLD'
+  | 'REFUND'
+  | 'AI_SPEND'
+  | 'RELEASE_HOLD'
+  | 'ADMIN_ADJUSTMENT';
+export type CreditHistoryStatus = 'completed' | 'holding' | 'refunded' | 'pending';
+export type KeywordAction = 'flag' | 'block';
+export type ComplaintStatus = 'received' | 'processing' | 'resolved';
 
 export interface User {
   id: string;
@@ -72,6 +81,7 @@ export interface Handover {
 export interface Transaction {
   id: string;
   itemId: string;
+  sourceItemId?: string;
   requesterId: string;
   ownerId: string;
   type: ItemType;
@@ -79,11 +89,20 @@ export interface Transaction {
   status: TransactionStatus;
   handoverId?: string;
   creditHeldBy: string[];
+  creditHeld?: boolean;
+  feeCaptured?: boolean;
+  ownerScheduleConfirmed?: boolean;
+  requesterScheduleConfirmed?: boolean;
+  completedByOwner?: boolean;
+  completedByRequester?: boolean;
   senderConfirmed: boolean;
   receiverConfirmed: boolean;
+  ownerEvidence?: string[];
+  requesterEvidence?: string[];
   senderEvidence?: string[];
   receiverEvidence?: string[];
   completedAt?: string;
+  complaintDeadline?: string;
   cancelledAt?: string;
   disputeId?: string;
   createdAt: string;
@@ -112,9 +131,13 @@ export interface Message {
 export interface CreditHistory {
   id: string;
   userId: string;
+  transactionId: string;
   type: CreditHistoryType;
   amount: number;
   balance: number;
+  description: string;
+  status: CreditHistoryStatus;
+  relatedTransactionId?: string;
   ref?: string;
   note: string;
   createdAt: string;
@@ -143,11 +166,54 @@ export interface Dispute {
   createdAt: string;
 }
 
+export interface ForbiddenKeyword {
+  id: string;
+  keyword: string;
+  detections: number;
+  action: KeywordAction;
+}
+
+export interface SupportedDistrict {
+  id: string;
+  name: string;
+  status: 'active' | 'inactive';
+}
+
+export interface Complaint {
+  id: string;
+  reporterId: string;
+  reportedUserId: string;
+  transactionId: string;
+  reason: string;
+  content: string;
+  evidence: string[];
+  createdAt: string;
+  status: ComplaintStatus;
+  adminNote?: string;
+  resolution?: string;
+  resolvedAt?: string;
+}
+
+export interface AiUsageCounter {
+  id: string;
+  userId: string;
+  feature: 'SWAP_MATCHING' | 'ASSISTANT_SEARCH';
+  periodKey: string;
+  count: number;
+}
+
+export interface RankRule {
+  id: string;
+  name: string;
+  minPoints: number;
+  maxPoints?: number;
+}
+
 export interface AdminAuditLog {
   id: string;
   adminId: string;
   action: string;
-  targetType: 'user' | 'item' | 'transaction' | 'dispute' | 'setting';
+  targetType: 'user' | 'item' | 'transaction' | 'dispute' | 'setting' | 'keyword' | 'district' | 'complaint' | 'rank';
   targetId: string;
   detail: string;
   createdAt: string;
@@ -163,6 +229,7 @@ export interface SystemSetting {
 
 export interface AppStateData {
   currentUserId: string | null;
+  systemRevenue: number;
   users: User[];
   items: Item[];
   transactions: Transaction[];
@@ -172,6 +239,11 @@ export interface AppStateData {
   creditHistory: CreditHistory[];
   topups: Topup[];
   disputes: Dispute[];
+  keywords: ForbiddenKeyword[];
+  districts: SupportedDistrict[];
+  complaints: Complaint[];
+  aiUsage: AiUsageCounter[];
+  ranks: RankRule[];
   auditLogs: AdminAuditLog[];
   settings: SystemSetting[];
 }

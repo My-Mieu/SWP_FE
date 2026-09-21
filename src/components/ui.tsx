@@ -294,7 +294,7 @@ export function Alert({
 export function ProductCard({ item, owner }: { item: Item; owner?: User }) {
   return (
     <Link
-      to={`/product/${item.id}`}
+      to={`/items/${item.id}`}
       className="group block min-w-0 overflow-hidden rounded-lg bg-white ring-1 ring-border/80 transition duration-300 hover:-translate-y-1 hover:shadow-md hover:ring-primary/20"
     >
       <div className="relative aspect-[4/3] overflow-hidden bg-surface-container">
@@ -311,11 +311,20 @@ export function ProductCard({ item, owner }: { item: Item; owner?: User }) {
         <h3 className="line-clamp-2 min-h-10 text-sm font-bold leading-5 text-text-primary sm:min-h-11 sm:text-[15px] sm:leading-[1.45]">
           {item.title}
         </h3>
+        <p className="mt-2 line-clamp-2 text-xs leading-5 text-text-muted">
+          {item.description}
+        </p>
         <div className="mt-3 flex min-w-0 items-center gap-2">
           <ConditionBadge condition={item.condition} />
           <span className="min-w-0 truncate text-xs text-text-muted">{item.category}</span>
         </div>
-        <div className="mt-3 flex items-center justify-between gap-2 border-t border-border/60 pt-3 text-xs text-text-muted sm:mt-4">
+        {owner ? (
+          <div className="mt-3 flex min-w-0 items-center gap-2 text-xs font-semibold text-text-secondary">
+            <Avatar user={owner} size="sm" />
+            <span className="min-w-0 truncate">{owner.name}</span>
+          </div>
+        ) : null}
+        <div className="mt-3 flex items-center justify-between gap-2 border-t border-border/60 pt-3 text-xs text-text-muted">
           <span className="inline-flex min-w-0 items-center gap-1.5 truncate">
             <Icon name="location" className="size-4 shrink-0" />
             {item.district}
@@ -325,6 +334,10 @@ export function ProductCard({ item, owner }: { item: Item; owner?: User }) {
             {owner?.reputationStars ?? 5}
           </span>
         </div>
+        <span className="mt-3 inline-flex items-center gap-1 text-xs font-bold text-primary transition group-hover:text-primary-hover">
+          Xem chi tiết
+          <Icon name="arrow" className="size-3.5" />
+        </span>
       </div>
     </Link>
   );
@@ -332,7 +345,7 @@ export function ProductCard({ item, owner }: { item: Item; owner?: User }) {
 export function HorizontalProductCard({ item, owner }: { item: Item; owner?: User }) {
   return (
     <Link
-      to={`/product/${item.id}`}
+      to={`/items/${item.id}`}
       className="group flex min-w-0 gap-3 rounded-md p-2 transition hover:bg-primary-faint"
     >
       <img

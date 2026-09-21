@@ -1,7 +1,28 @@
 import { configureStore, createSlice, type PayloadAction } from '@reduxjs/toolkit';
-import { assertWalletInvariant, holdFee, releaseFee, spendHeldFee, txFee } from '../utils/credit';
+import {
+  AI_ASSISTANT_SEARCH_FEE,
+  AI_SWAP_MATCHING_FEE,
+  TOPUP_MIN_VND,
+  assertWalletInvariant,
+  canPayTransactionFees,
+  holdAllTransactionFees,
+  missingCreditMessages,
+  releaseFee,
+  requiredCreditForItemType,
+  spendAvailableCredit,
+  spendHeldFee,
+  txFee,
+} from '../utils/credit';
 import { loadPersistedState, resetPersistedState, savePersistedState } from '../utils/storage';
-import type { AppStateData, Handover, Item, Transaction } from '../types/domain';
+import type {
+  AppStateData,
+  ComplaintStatus,
+  Handover,
+  Item,
+  KeywordAction,
+  RankRule,
+  Transaction,
+} from '../types/domain';
 import { canTransition, transitionTransaction } from '../utils/transaction';
 
 const initialState: AppStateData = loadPersistedState();
@@ -15,6 +36,42 @@ const activeAdmin = (state: AppStateData, adminId: string) =>
   state.users.some((user) => user.id === adminId && user.role === 'admin');
 const participant = (state: AppStateData, tx: Transaction, actorId: string) =>
   activeActor(state, actorId) && (tx.ownerId === actorId || tx.requesterId === actorId);
+const rankFor = (points: number, ranks: RankRule[]) =>
+  [...ranks]
+    .sort((a, b) => b.minPoints - a.minPoints)
+    .find((rank) => points >= rank.minPoints && (rank.maxPoints === undefined || points <= rank.maxPoints))
+    ?.name ?? 'Thành viên mới';
+const recalculateUserRanks = (state: AppStateData) => {
+  state.users.forEach((user) => {
+    if (user.role !== 'admin') user.rank = rankFor(user.rewardPoints, state.ranks);
+  });
+};
+const hasContactInfo = (text: string) =>
+  /(?:\+?84|0)(?:[\s.-]?\d){8,10}\b/.test(text) ||
+  /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(text) ||
+  /(https?:\/\/|www\.|zalo|facebook|telegram|viber)/i.test(text);
+
+const addSystemMessage = (state: AppStateData, transactionId: string, text: string) => {
+  const conv = state.conversations.find((entry) => entry.transactionId === transactionId);
+  if (!conv) return;
+  state.messages.push({
+    id: uniqueId('msg'),
+    convId: conv.id,
+    sender: 'system',
+    type: 'system',
+    text,
+    time: 'Bay gio',
+  });
+  conv.lastMessage = text;
+  conv.lastMessageAt = new Date().toISOString();
+};
+
+const mondayKey = (date = new Date()) => {
+  const copy = new Date(date);
+  const day = copy.getDay() || 7;
+  copy.setDate(copy.getDate() - day + 1);
+  return copy.toISOString().slice(0, 10);
+};
 
 const dataSlice = createSlice({
   name: 'data',
@@ -57,8 +114,8 @@ const dataSlice = createSlice({
           .slice(-2)
           .join('')
           .toUpperCase(),
-        totalCredit: 20,
-        availableCredit: 20,
+        totalCredit: 20000,
+        availableCredit: 20000,
         holdCredit: 0,
         rewardPoints: 0,
         reputationStars: 5,
@@ -158,26 +215,64 @@ const dataSlice = createSlice({
         createdAt: new Date().toISOString(),
       });
     },
-    createTransaction(state, action: PayloadAction<{ itemId: string; requesterId: string }>) {
+    createTransaction(
+      state,
+      action: PayloadAction<{ itemId: string; requesterId: string; sourceItemId?: string }>,
+    ) {
       const item = state.items.find((entry) => entry.id === action.payload.itemId);
+      const sourceItem = action.payload.sourceItemId
+        ? state.items.find((entry) => entry.id === action.payload.sourceItemId)
+        : undefined;
       if (
         !item ||
         item.ownerId === action.payload.requesterId ||
         item.status !== 'approved' ||
+        (sourceItem &&
+          (sourceItem.ownerId !== action.payload.requesterId ||
+            sourceItem.type !== 'trade' ||
+            sourceItem.status !== 'approved' ||
+            item.type !== 'trade')) ||
         !activeActor(state, action.payload.requesterId)
       )
         return;
+      const requester = state.users.find((entry) => entry.id === action.payload.requesterId);
+      const requiredCredit = requiredCreditForItemType(item.type);
+      if (!requester || requester.availableCredit < requiredCredit) {
+        const message =
+          item.type === 'trade'
+            ? `Ban can it nhat ${requiredCredit.toLocaleString('vi-VN')} Credit de tham gia giao dich nay.`
+            : `Ban can it nhat ${requiredCredit.toLocaleString('vi-VN')} Credit de nhan mon do nay.`;
+        state.auditLogs.unshift({
+          id: uniqueId('log'),
+          adminId: action.payload.requesterId,
+          action: 'request_credit_blocked',
+          targetType: 'transaction',
+          targetId: item.id,
+          detail: message,
+          createdAt: new Date().toISOString(),
+        });
+        return;
+      }
       const tx: Transaction = {
         id: uniqueId('tx'),
         itemId: item.id,
+        sourceItemId: sourceItem?.id,
         requesterId: action.payload.requesterId,
         ownerId: item.ownerId,
         type: item.type,
         feeCredit: txFee(state),
         status: 'NEGOTIATING',
         creditHeldBy: [],
+        creditHeld: false,
+        feeCaptured: false,
+        ownerScheduleConfirmed: false,
+        requesterScheduleConfirmed: false,
+        completedByOwner: false,
+        completedByRequester: false,
         senderConfirmed: false,
         receiverConfirmed: false,
+        ownerEvidence: [],
+        requesterEvidence: [],
         senderEvidence: [],
         receiverEvidence: [],
         createdAt: new Date().toISOString(),
@@ -189,7 +284,9 @@ const dataSlice = createSlice({
         transactionId: tx.id,
         participantIds: [tx.requesterId, tx.ownerId],
         itemId: item.id,
-        lastMessage: 'Đề xuất giao dịch đã được tạo.',
+        lastMessage: sourceItem
+          ? `Đề xuất trao đổi từ ${sourceItem.title} đã được tạo.`
+          : 'Đề xuất giao dịch đã được tạo.',
         lastMessageAt: new Date().toISOString(),
         unreadCount: 0,
       });
@@ -198,7 +295,9 @@ const dataSlice = createSlice({
         convId,
         sender: 'system',
         type: 'system',
-        text: 'Đề xuất giao dịch đã được tạo.',
+        text: sourceItem
+          ? `Đề xuất trao đổi từ "${sourceItem.title}" sang "${item.title}" đã được tạo.`
+          : 'Đề xuất giao dịch đã được tạo.',
         time: 'Bây giờ',
       });
     },
@@ -210,9 +309,15 @@ const dataSlice = createSlice({
         !canTransition(tx, 'SCHEDULE_PROPOSED')
       )
         return;
+      if (!canPayTransactionFees(state, tx)) {
+        addSystemMessage(state, tx.id, missingCreditMessages(state, tx).join(' '));
+        return;
+      }
       const id = uniqueId('ho');
       state.handovers.push({ ...action.payload, id, status: 'proposed' });
       tx.handoverId = id;
+      tx.ownerScheduleConfirmed = tx.ownerId === action.payload.proposedBy;
+      tx.requesterScheduleConfirmed = tx.requesterId === action.payload.proposedBy;
       transitionTransaction(tx, 'SCHEDULE_PROPOSED');
       const conv = state.conversations.find((entry) => entry.transactionId === tx.id);
       if (conv)
@@ -242,13 +347,18 @@ const dataSlice = createSlice({
       ho.status = 'confirmed';
       ho.agreedBy = action.payload.userId;
       transitionTransaction(tx, 'SCHEDULE_CONFIRMED');
-    },
-    holdTransactionFee(state, action: PayloadAction<{ transactionId: string; userId: string }>) {
-      const transaction = state.transactions.find(
-        (entry) => entry.id === action.payload.transactionId,
-      );
-      if (!transaction || !participant(state, transaction, action.payload.userId)) return;
-      holdFee(state, action.payload.transactionId, action.payload.userId);
+      tx.ownerScheduleConfirmed = true;
+      tx.requesterScheduleConfirmed = true;
+      if (holdAllTransactionFees(state, tx.id)) {
+        addSystemMessage(state, tx.id, 'Lich da duoc xac nhan va Credit da duoc giu. Thong tin lien he da mo khoa.');
+      } else {
+        ho.status = 'proposed';
+        ho.agreedBy = undefined;
+        tx.ownerScheduleConfirmed = tx.ownerId === ho.proposedBy;
+        tx.requesterScheduleConfirmed = tx.requesterId === ho.proposedBy;
+        tx.status = 'SCHEDULE_PROPOSED';
+        addSystemMessage(state, tx.id, missingCreditMessages(state, tx).join(' ') || 'Khong the giu Credit. Vui long kiem tra so du.');
+      }
     },
     confirmTransactionSide(
       state,
@@ -261,31 +371,212 @@ const dataSlice = createSlice({
         !['WAITING_HANDOVER', 'SENDER_CONFIRMED', 'RECEIVER_CONFIRMED'].includes(tx.status)
       )
         return;
-      const requiredPayers = tx.type === 'trade' ? [tx.ownerId, tx.requesterId] : [tx.requesterId];
-      if (!requiredPayers.every((payerId) => tx.creditHeldBy.includes(payerId))) return;
+      if (!tx.creditHeld) return;
       if (action.payload.userId === tx.ownerId) {
-        if (tx.senderConfirmed) return;
-        if (!canTransition(tx, tx.receiverConfirmed ? 'COMPLETED' : 'SENDER_CONFIRMED')) return;
+        if (tx.completedByOwner) return;
+        if (!canTransition(tx, tx.completedByRequester ? 'COMPLETED' : 'SENDER_CONFIRMED')) return;
+        tx.completedByOwner = true;
         tx.senderConfirmed = true;
-        tx.senderEvidence = action.payload.evidence ?? [];
-        if (tx.receiverConfirmed) {
+        tx.ownerEvidence = action.payload.evidence ?? [];
+        tx.senderEvidence = tx.ownerEvidence;
+        if (tx.completedByRequester) {
           if (!spendHeldFee(state, tx.id)) {
+            tx.completedByOwner = false;
             tx.senderConfirmed = false;
+            tx.ownerEvidence = [];
             tx.senderEvidence = [];
           }
         } else transitionTransaction(tx, 'SENDER_CONFIRMED');
       } else {
-        if (tx.receiverConfirmed) return;
-        if (!canTransition(tx, tx.senderConfirmed ? 'COMPLETED' : 'RECEIVER_CONFIRMED')) return;
+        if (tx.completedByRequester) return;
+        if (!canTransition(tx, tx.completedByOwner ? 'COMPLETED' : 'RECEIVER_CONFIRMED')) return;
+        tx.completedByRequester = true;
         tx.receiverConfirmed = true;
-        tx.receiverEvidence = action.payload.evidence ?? [];
-        if (tx.senderConfirmed) {
+        tx.requesterEvidence = action.payload.evidence ?? [];
+        tx.receiverEvidence = tx.requesterEvidence;
+        if (tx.completedByOwner) {
           if (!spendHeldFee(state, tx.id)) {
+            tx.completedByRequester = false;
             tx.receiverConfirmed = false;
+            tx.requesterEvidence = [];
             tx.receiverEvidence = [];
           }
         } else transitionTransaction(tx, 'RECEIVER_CONFIRMED');
       }
+    },
+    addKeyword(
+      state,
+      action: PayloadAction<{ adminId: string; keyword: string; action: KeywordAction }>,
+    ) {
+      if (!activeAdmin(state, action.payload.adminId)) return;
+      const keyword = action.payload.keyword.trim();
+      if (!keyword || state.keywords.some((entry) => entry.keyword.toLowerCase() === keyword.toLowerCase()))
+        return;
+      const id = uniqueId('kw');
+      state.keywords.unshift({ id, keyword, detections: 0, action: action.payload.action });
+      state.auditLogs.unshift({
+        id: uniqueId('log'),
+        adminId: action.payload.adminId,
+        action: 'add_keyword',
+        targetType: 'keyword',
+        targetId: id,
+        detail: `Thêm từ khóa cấm: ${keyword}`,
+        createdAt: new Date().toISOString(),
+      });
+    },
+    updateKeyword(
+      state,
+      action: PayloadAction<{ adminId: string; id: string; keyword: string; action: KeywordAction }>,
+    ) {
+      if (!activeAdmin(state, action.payload.adminId)) return;
+      const entry = state.keywords.find((item) => item.id === action.payload.id);
+      const keyword = action.payload.keyword.trim();
+      if (
+        !entry ||
+        !keyword ||
+        state.keywords.some(
+          (item) => item.id !== entry.id && item.keyword.toLowerCase() === keyword.toLowerCase(),
+        )
+      )
+        return;
+      entry.keyword = keyword;
+      entry.action = action.payload.action;
+    },
+    deleteKeyword(state, action: PayloadAction<{ adminId: string; id: string }>) {
+      if (!activeAdmin(state, action.payload.adminId)) return;
+      state.keywords = state.keywords.filter((entry) => entry.id !== action.payload.id);
+    },
+    addDistrict(state, action: PayloadAction<{ adminId: string; name: string }>) {
+      if (!activeAdmin(state, action.payload.adminId)) return;
+      const name = action.payload.name.trim();
+      if (!name || state.districts.some((entry) => entry.name.toLowerCase() === name.toLowerCase()))
+        return;
+      state.districts.push({ id: uniqueId('dist'), name, status: 'active' });
+    },
+    updateDistrict(state, action: PayloadAction<{ adminId: string; id: string; name: string }>) {
+      if (!activeAdmin(state, action.payload.adminId)) return;
+      const entry = state.districts.find((item) => item.id === action.payload.id);
+      const name = action.payload.name.trim();
+      if (
+        !entry ||
+        !name ||
+        state.districts.some(
+          (item) => item.id !== entry.id && item.name.toLowerCase() === name.toLowerCase(),
+        )
+      )
+        return;
+      const oldName = entry.name;
+      entry.name = name;
+      state.users.forEach((user) => {
+        if (user.district === oldName) user.district = name;
+      });
+      state.items.forEach((item) => {
+        if (item.district === oldName) item.district = name;
+      });
+      state.handovers.forEach((handover) => {
+        if (handover.district === oldName) handover.district = name;
+      });
+    },
+    deleteDistrict(state, action: PayloadAction<{ adminId: string; id: string }>) {
+      if (!activeAdmin(state, action.payload.adminId)) return;
+      state.districts = state.districts.filter((entry) => entry.id !== action.payload.id);
+    },
+    createComplaint(
+      state,
+      action: PayloadAction<{
+        transactionId: string;
+        reporterId: string;
+        reason: string;
+        content: string;
+        evidence: string[];
+      }>,
+    ) {
+      const tx = state.transactions.find((entry) => entry.id === action.payload.transactionId);
+      if (!tx || !participant(state, tx, action.payload.reporterId)) return;
+      const now = Date.now();
+      if (
+        tx.status !== 'COMPLETED' ||
+        !tx.complaintDeadline ||
+        now > new Date(tx.complaintDeadline).getTime()
+      )
+        return;
+      const reason = action.payload.reason.trim();
+      const content = action.payload.content.trim();
+      if (!reason || !content) return;
+      const reportedUserId = tx.ownerId === action.payload.reporterId ? tx.requesterId : tx.ownerId;
+      state.complaints.unshift({
+        id: uniqueId('cmp'),
+        reporterId: action.payload.reporterId,
+        reportedUserId,
+        transactionId: tx.id,
+        reason,
+        content,
+        evidence: action.payload.evidence,
+        createdAt: new Date().toISOString(),
+        status: 'received',
+      });
+    },
+    updateComplaintStatus(
+      state,
+      action: PayloadAction<{
+        adminId: string;
+        complaintId: string;
+        status: ComplaintStatus;
+        adminNote?: string;
+        resolution?: string;
+      }>,
+    ) {
+      if (!activeAdmin(state, action.payload.adminId)) return;
+      const complaint = state.complaints.find((entry) => entry.id === action.payload.complaintId);
+      if (!complaint) return;
+      const allowed =
+        (complaint.status === 'received' && action.payload.status === 'processing') ||
+        (complaint.status === 'processing' && action.payload.status === 'resolved') ||
+        complaint.status === action.payload.status;
+      if (!allowed) return;
+      complaint.status = action.payload.status;
+      complaint.adminNote = action.payload.adminNote ?? complaint.adminNote;
+      complaint.resolution = action.payload.resolution ?? complaint.resolution;
+      if (action.payload.status === 'resolved') complaint.resolvedAt = new Date().toISOString();
+    },
+    updateRankRule(
+      state,
+      action: PayloadAction<{
+        adminId: string;
+        id: string;
+        name: string;
+        minPoints: number;
+        maxPoints?: number;
+      }>,
+    ) {
+      if (!activeAdmin(state, action.payload.adminId)) return;
+      const rank = state.ranks.find((entry) => entry.id === action.payload.id);
+      if (!rank || !action.payload.name.trim() || action.payload.minPoints < 0) return;
+      const nextRanks = state.ranks.map((entry) =>
+        entry.id === rank.id
+          ? {
+              ...entry,
+              name: action.payload.name.trim(),
+              minPoints: action.payload.minPoints,
+              maxPoints: action.payload.maxPoints,
+            }
+          : entry,
+      );
+      const valid = nextRanks.every((entry, index) =>
+        nextRanks.every((other, otherIndex) => {
+          if (index === otherIndex) return true;
+          const aMax = entry.maxPoints ?? Number.MAX_SAFE_INTEGER;
+          const bMax = other.maxPoints ?? Number.MAX_SAFE_INTEGER;
+          return aMax < other.minPoints || bMax < entry.minPoints;
+        }),
+      );
+      if (!valid) return;
+      Object.assign(rank, {
+        name: action.payload.name.trim(),
+        minPoints: action.payload.minPoints,
+        maxPoints: action.payload.maxPoints,
+      });
+      recalculateUserRanks(state);
     },
     cancelTransaction(state, action: PayloadAction<{ transactionId: string; actorId: string }>) {
       const tx = state.transactions.find((entry) => entry.id === action.payload.transactionId);
@@ -303,6 +594,17 @@ const dataSlice = createSlice({
         !action.payload.text.trim()
       )
         return;
+      if (!tx.creditHeld && hasContactInfo(action.payload.text)) {
+        state.messages.push({
+          id: uniqueId('msg'),
+          convId: action.payload.convId,
+          sender: 'system',
+          type: 'system',
+          text: 'Tin nhan co thong tin lien he ngoai he thong. Thong tin nay chi mo khoa sau khi hai ben chot lich va giu Credit thanh cong.',
+          time: 'Bay gio',
+        });
+        return;
+      }
       state.messages.push({
         id: uniqueId('msg'),
         convId: action.payload.convId,
@@ -322,11 +624,11 @@ const dataSlice = createSlice({
       if (!user || !activeActor(state, action.payload.userId)) return;
       if (
         !Number.isSafeInteger(action.payload.vnd) ||
-        action.payload.vnd <= 0 ||
+        action.payload.vnd < TOPUP_MIN_VND ||
         action.payload.vnd % 1000 !== 0
       )
         return;
-      const amount = action.payload.vnd / 1000;
+      const amount = action.payload.vnd;
       const id = action.payload.id ?? uniqueId('top');
       const code = action.payload.code ?? uniqueId('SLTOPUP');
       if (
@@ -357,8 +659,9 @@ const dataSlice = createSlice({
         topup.status !== 'pending' ||
         !Number.isSafeInteger(topup.vnd) ||
         topup.vnd <= 0 ||
+        topup.vnd < TOPUP_MIN_VND ||
         topup.vnd % 1000 !== 0 ||
-        topup.amount !== topup.vnd / 1000 ||
+        topup.amount !== topup.vnd ||
         !Number.isSafeInteger(user.totalCredit + topup.amount) ||
         !Number.isSafeInteger(user.availableCredit + topup.amount) ||
         state.creditHistory.some((entry) => entry.ref === topup.id)
@@ -371,9 +674,12 @@ const dataSlice = createSlice({
       state.creditHistory.unshift({
         id: uniqueId('ch'),
         userId: user.id,
+        transactionId: topup.id,
         type: 'TOPUP',
         amount: topup.amount,
         balance: user.availableCredit,
+        description: 'Nạp Credit qua QR',
+        status: 'completed',
         ref: topup.id,
         note: 'Nạp Credit qua QR',
         createdAt: new Date().toISOString(),
@@ -387,6 +693,51 @@ const dataSlice = createSlice({
         detail: `Xác nhận nạp ${topup.amount} Credit`,
         createdAt: new Date().toISOString(),
       });
+    },
+    useAiFeature(
+      state,
+      action: PayloadAction<{ userId: string; feature: 'SWAP_MATCHING' | 'ASSISTANT_SEARCH' }>,
+    ) {
+      if (!activeActor(state, action.payload.userId)) return;
+      const periodKey =
+        action.payload.feature === 'SWAP_MATCHING'
+          ? `week:${mondayKey()}`
+          : `day:${new Date().toISOString().slice(0, 10)}`;
+      let counter = state.aiUsage.find(
+        (entry) =>
+          entry.userId === action.payload.userId &&
+          entry.feature === action.payload.feature &&
+          entry.periodKey === periodKey,
+      );
+      if (!counter) {
+        counter = {
+          id: uniqueId('aiu'),
+          userId: action.payload.userId,
+          feature: action.payload.feature,
+          periodKey,
+          count: 0,
+        };
+        state.aiUsage.push(counter);
+      }
+      const freeLimit = action.payload.feature === 'SWAP_MATCHING' ? 1 : 5;
+      const fee =
+        action.payload.feature === 'SWAP_MATCHING'
+          ? AI_SWAP_MATCHING_FEE
+          : AI_ASSISTANT_SEARCH_FEE;
+      if (counter.count >= freeLimit) {
+        const paid = spendAvailableCredit(state, {
+          userId: action.payload.userId,
+          amount: fee,
+          type: 'AI_SPEND',
+          ref: `ai:${action.payload.feature}:${action.payload.userId}:${Date.now()}`,
+          description:
+            action.payload.feature === 'SWAP_MATCHING'
+              ? 'Phi AI goi y ghep doi Swap'
+              : 'Phi AI tro ly tim do',
+        });
+        if (!paid) return;
+      }
+      counter.count += 1;
     },
     adminAdjustCredit(
       state,
@@ -417,9 +768,12 @@ const dataSlice = createSlice({
       state.creditHistory.unshift({
         id: uniqueId('ch'),
         userId: user.id,
+        transactionId: action.payload.ref,
         type: 'ADMIN_ADJUSTMENT',
         amount: action.payload.amount,
         balance: user.availableCredit,
+        description: action.payload.note,
+        status: 'completed',
         ref: action.payload.ref,
         note: action.payload.note,
         createdAt: new Date().toISOString(),

@@ -5,22 +5,22 @@ import { Button, Field, Icon, PageHeader } from '../../components/ui';
 import type { CreditHistory, CreditHistoryType, Topup } from '../../types/domain';
 import { formatCredit, formatVnd } from '../../utils/formatting';
 
-const packages = [5, 10, 20, 50, 100, 200];
+const packages = [10000, 20000, 50000, 100000, 200000];
 type Step = 'select' | 'qr' | 'pending';
 type HistoryFilter = 'all' | 'topup' | 'spend' | 'hold' | 'refund';
 
 const filterTypes: Record<Exclude<HistoryFilter, 'all'>, CreditHistoryType[]> = {
-  topup: ['TOPUP', 'ADMIN_ADJUSTMENT'],
-  spend: ['TRANSACTION_FEE', 'AI_FEE'],
+  topup: ['TOPUP'],
+  spend: ['SPEND', 'AI_SPEND'],
   hold: ['HOLD'],
-  refund: ['RELEASE_HOLD', 'REFUND'],
+  refund: ['REFUND', 'RELEASE_HOLD'],
 };
 
 export function Credit() {
   const user = useAppSelector(selectCurrentUser)!;
   const data = useAppSelector(selectData);
   const dispatch = useAppDispatch();
-  const [creditAmount, setCreditAmount] = useState(50);
+  const [creditAmount, setCreditAmount] = useState(50000);
   const [customAmount, setCustomAmount] = useState('');
   const [step, setStep] = useState<Step>('select');
   const [transactionCode, setTransactionCode] = useState('');
@@ -30,13 +30,21 @@ export function Credit() {
   const topups = data.topups.filter((topup) => topup.userId === user.id);
   const activeTopup = topups.find((topup) => topup.id === activeTopupId);
   const latestCompleted = topups.find((topup) => topup.status === 'completed');
-  const paymentValue = creditAmount * 1000;
+  const paymentValue = creditAmount;
+
+  const allHistory = useMemo(
+    () =>
+      data.creditHistory
+        .filter((entry) => entry.userId === user.id)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+    [data.creditHistory, user.id],
+  );
 
   const history = useMemo(() => {
-    const entries = data.creditHistory.filter((entry) => entry.userId === user.id);
+    const entries = allHistory;
     if (historyFilter === 'all') return entries;
     return entries.filter((entry) => filterTypes[historyFilter].includes(entry.type));
-  }, [data.creditHistory, historyFilter, user.id]);
+  }, [allHistory, historyFilter]);
 
   const continuePayment = () => {
     const code = `SLTOPUP-${crypto.randomUUID()}`;
@@ -89,7 +97,7 @@ export function Credit() {
             <div className="mt-3 text-4xl font-bold tabular-nums sm:text-5xl">
               {formatCredit(user.totalCredit)}
             </div>
-            <p className="mt-3 text-sm text-white/70">1 Credit = 1.000đ</p>
+            <p className="mt-3 text-sm text-white/70">1 Credit = 1đ</p>
           </div>
           <button
             className="inline-flex min-h-11 items-center justify-center rounded-md bg-white px-4 py-2 text-sm font-bold text-primary shadow-sm transition duration-200 hover:bg-primary-soft active:translate-y-px"
@@ -145,6 +153,7 @@ export function Credit() {
       </section>
 
       <CreditHistorySection
+        allHistory={allHistory}
         history={history}
         pendingTopups={
           historyFilter === 'all' || historyFilter === 'topup'
@@ -211,7 +220,7 @@ function TopupSelection({
                 ) : null}
                 <strong className="block text-base text-text-primary">{amount} Credit</strong>
                 <span className="mt-1 block text-xs text-text-muted">
-                  {formatVnd(amount * 1000)}
+                  {formatVnd(amount)}
                 </span>
               </button>
             );
@@ -221,12 +230,12 @@ function TopupSelection({
           <Field
             label="Số Credit khác"
             type="number"
-            min={1}
+            min={10000}
             step={1}
             value={customAmount}
             onChange={(event) => onCustomChange(event.target.value)}
             placeholder="Nhập số Credit"
-            hint="Tối thiểu 1 Credit."
+            hint="Toi thieu 10.000 Credit."
           />
         </div>
       </div>
@@ -242,7 +251,7 @@ function PaymentSummary({
   creditAmount: number;
   onContinue: () => void;
 }) {
-  const value = creditAmount * 1000;
+  const value = creditAmount;
   return (
     <aside className="h-fit rounded-xl bg-white p-5 ring-1 ring-border/80 sm:p-6 lg:sticky lg:top-24">
       <h2 className="text-base font-bold">Tóm tắt thanh toán</h2>
@@ -255,7 +264,7 @@ function PaymentSummary({
         <span className="text-sm font-semibold">Tổng thanh toán</span>
         <strong className="text-lg tabular-nums text-primary">{formatVnd(value)}</strong>
       </div>
-      <Button className="mt-5 w-full" size="lg" onClick={onContinue} disabled={creditAmount < 1}>
+      <Button className="mt-5 w-full" size="lg" onClick={onContinue} disabled={creditAmount < 10000}>
         Tiếp tục thanh toán
       </Button>
       <p className="mt-3 text-center text-[11px] leading-5 text-text-muted">
@@ -303,7 +312,7 @@ function QrPayment({
           </div>
           <div>
             <dl className="space-y-3 rounded-lg bg-background p-4 text-sm">
-              <SummaryRow label="Số tiền" value={formatVnd(creditAmount * 1000)} />
+              <SummaryRow label="Số tiền" value={formatVnd(creditAmount)} />
               <SummaryRow label="Credit nhận" value={`${creditAmount} Credit`} />
               <SummaryRow label="Mã giao dịch" value={transactionCode} />
             </dl>
@@ -372,16 +381,23 @@ function PendingTopup({
 }
 
 function CreditHistorySection({
+  allHistory,
   history,
   pendingTopups,
   activeFilter,
   onFilterChange,
 }: {
+  allHistory: CreditHistory[];
   history: CreditHistory[];
   pendingTopups: Topup[];
   activeFilter: HistoryFilter;
   onFilterChange: Dispatch<HistoryFilter>;
 }) {
+  const countFor = (filter: HistoryFilter) => {
+    const pendingCount = filter === 'all' || filter === 'topup' ? pendingTopups.length : 0;
+    if (filter === 'all') return allHistory.length + pendingCount;
+    return allHistory.filter((entry) => filterTypes[filter].includes(entry.type)).length + pendingCount;
+  };
   const tabs: Array<[HistoryFilter, string]> = [
     ['all', 'Tất cả'],
     ['topup', 'Nạp Credit'],
@@ -400,7 +416,7 @@ function CreditHistorySection({
               onClick={() => onFilterChange(id)}
               className={`border-b-2 px-3 py-2.5 text-sm font-semibold ${activeFilter === id ? 'border-primary text-primary' : 'border-transparent text-text-muted hover:text-text-primary'}`}
             >
-              {label}
+              {label} ({countFor(id)})
             </button>
           ))}
         </div>
@@ -409,7 +425,9 @@ function CreditHistorySection({
         {pendingTopups.map((topup) => (
           <HistoryRow
             key={topup.id}
+            icon="wallet"
             title="Nạp Credit"
+            transactionId={topup.code}
             date={topup.createdAt}
             amount={topup.amount}
             status="Đang xác nhận"
@@ -419,9 +437,11 @@ function CreditHistorySection({
         {history.map((entry) => (
           <HistoryRow
             key={entry.id}
-            title={historyTitle(entry)}
+            icon={historyIcon(entry)}
+            title={entry.description ?? historyTitle(entry)}
+            transactionId={entry.transactionId}
             date={entry.createdAt}
-            amount={entry.type === 'HOLD' ? Math.abs(entry.amount) : entry.amount}
+            amount={entry.amount}
             status={historyStatus(entry)}
             tone={historyTone(entry)}
           />
@@ -437,13 +457,17 @@ function CreditHistorySection({
 }
 
 function HistoryRow({
+  icon,
   title,
+  transactionId,
   date,
   amount,
   status,
   tone,
 }: {
+  icon: 'wallet' | 'payments' | 'history' | 'renew';
   title: string;
+  transactionId: string;
   date: string;
   amount: number;
   status: string;
@@ -457,19 +481,27 @@ function HistoryRow({
         : tone === 'hold'
           ? 'text-warning'
           : 'text-text-secondary';
-  const prefix = tone === 'positive' ? '+' : tone === 'negative' ? '' : '';
+  const prefix = amount > 0 ? '+' : '';
   return (
     <div className="grid grid-cols-[1fr_auto] gap-4 border-b border-border/70 px-4 py-4 last:border-0 sm:px-5">
-      <div className="min-w-0">
-        <p className="truncate text-sm font-semibold text-text-primary">{title}</p>
-        <p className="mt-1 text-xs text-text-muted">
-          {new Date(date).toLocaleString('vi-VN')} · {status}
-        </p>
+      <div className="flex min-w-0 gap-3">
+        <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-md bg-surface-low text-primary">
+          <Icon name={icon} className="size-5" />
+        </span>
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold text-text-primary">{title}</p>
+          <p className="mt-1 truncate text-xs text-text-muted">
+            {transactionId} · {new Date(date).toLocaleString('vi-VN')}
+          </p>
+        </div>
       </div>
-      <strong className={`self-center whitespace-nowrap text-sm tabular-nums ${amountClass}`}>
-        {prefix}
-        {amount} Credit
-      </strong>
+      <div className="self-center text-right">
+        <strong className={`block whitespace-nowrap text-sm tabular-nums ${amountClass}`}>
+          {prefix}
+          {amount} Credit
+        </strong>
+        <span className="mt-1 block text-xs text-text-muted">{status}</span>
+      </div>
     </div>
   );
 }
@@ -477,17 +509,20 @@ function HistoryRow({
 function historyTitle(entry: CreditHistory) {
   const labels: Record<CreditHistoryType, string> = {
     TOPUP: 'Nạp Credit',
-    TRANSACTION_FEE: 'Phí giao dịch',
-    AI_FEE: 'Phí dịch vụ AI',
+    SPEND: 'Phí giao dịch',
+    AI_SPEND: 'Phí dịch vụ AI',
     HOLD: 'Giữ phí giao dịch',
     RELEASE_HOLD: 'Hoàn Credit',
     REFUND: 'Hoàn Credit',
-    ADMIN_ADJUSTMENT: 'Điều chỉnh Credit',
+    ADMIN_ADJUSTMENT: 'Cập nhật hệ thống',
   };
   return labels[entry.type];
 }
 
 function historyStatus(entry: CreditHistory) {
+  if (entry.status === 'holding') return 'Đang giữ';
+  if (entry.status === 'refunded') return 'Đã hoàn';
+  if (entry.status === 'pending') return 'Đang xác nhận';
   if (entry.type === 'HOLD') return 'Đang giữ';
   if (entry.type === 'RELEASE_HOLD' || entry.type === 'REFUND') return 'Đã hoàn';
   return 'Hoàn tất';
@@ -498,4 +533,11 @@ function historyTone(entry: CreditHistory): 'positive' | 'negative' | 'hold' | '
   if (entry.type === 'RELEASE_HOLD' || entry.type === 'REFUND' || entry.amount > 0)
     return 'positive';
   return 'negative';
+}
+
+function historyIcon(entry: CreditHistory): 'wallet' | 'payments' | 'history' | 'renew' {
+  if (entry.type === 'TOPUP') return 'wallet';
+  if (entry.type === 'HOLD') return 'history';
+  if (entry.type === 'REFUND' || entry.type === 'RELEASE_HOLD') return 'renew';
+  return 'payments';
 }

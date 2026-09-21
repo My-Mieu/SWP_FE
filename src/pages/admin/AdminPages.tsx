@@ -3,16 +3,22 @@ import { Link, useParams } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../../app/hooks';
 import { actions, selectCurrentUser, selectData } from '../../app/store';
 import {
+  Avatar,
   Button,
+  EmptyState,
   Field,
+  Icon,
   PageHeader,
   SearchField,
+  Select,
   Stat,
   StatusBadge,
+  TextArea,
   TypeBadge,
 } from '../../components/ui';
-import { CATEGORIES, DISTRICTS } from '../../constants/domain';
+import { CATEGORIES } from '../../constants/domain';
 import { formatVnd } from '../../utils/formatting';
+import type { ComplaintStatus, ForbiddenKeyword, KeywordAction, RankRule, SupportedDistrict } from '../../types/domain';
 
 function Panel({
   title,
@@ -95,7 +101,7 @@ export function AdminDashboard() {
                 <tr>
                   <td className="font-semibold">Giao dịch cần theo dõi</td>
                   <td>
-                    {data.transactions.filter((t) => t.status === 'DISPUTED').length} tranh chấp
+                    {data.complaints.filter((item) => item.status !== 'resolved').length} khiếu nại
                   </td>
                   <td>
                     <span className="text-error">Ưu tiên</span>
@@ -310,9 +316,6 @@ export function AdminUsers() {
 export function AdminUserDetail() {
   const { userId } = useParams();
   const data = useAppSelector(selectData);
-  const admin = useAppSelector(selectCurrentUser)!;
-  const dispatch = useAppDispatch();
-  const [amount, setAmount] = useState(5);
   const u = data.users.find((x) => x.id === userId);
   if (!u)
     return (
@@ -321,74 +324,72 @@ export function AdminUserDetail() {
       </Panel>
     );
   const txs = data.transactions.filter((t) => t.ownerId === u.id || t.requesterId === u.id);
+  const creditHistory = data.creditHistory.filter((entry) => entry.userId === u.id);
   return (
     <Panel
       title={u.name}
       description={`${u.email} · ${u.phone} · ${u.district}`}
       action={<StatusBadge status={u.status} />}
     >
-      <div className="grid gap-6 xl:grid-cols-[1fr_360px]">
-        <div className="space-y-6">
-          <section className="grid gap-5 rounded-lg bg-white p-5 ring-1 ring-border/80 sm:grid-cols-3">
-            <Stat label="Credit khả dụng" value={u.availableCredit} />
-            <Stat label="Credit đang giữ" value={u.holdCredit} />
-            <Stat label="Giao dịch" value={txs.length} />
-          </section>
-          <section>
-            <h2 className="mb-3 section-title">Giao dịch gần đây</h2>
-            <div className="table-wrap">
-              <table className="data-table">
-                <tbody>
-                  {txs.map((tx) => (
-                    <tr key={tx.id}>
-                      <td>
-                        <Link
-                          className="font-semibold text-primary"
-                          to={`/admin/transactions/${tx.id}`}
-                        >
-                          {tx.id}
-                        </Link>
-                      </td>
-                      <td>{data.items.find((i) => i.id === tx.itemId)?.title}</td>
-                      <td>
-                        <StatusBadge status={tx.status} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        </div>
-        <aside className="h-fit rounded-lg bg-white p-5 ring-1 ring-border/80">
-          <h2 className="section-title">Điều chỉnh Credit</h2>
-          <p className="mt-1 text-xs leading-5 text-text-muted">
-            Mọi thay đổi đều được ghi vào Audit Log.
-          </p>
-          <Field
-            className="mt-4"
-            type="number"
-            label="Số Credit"
-            value={amount}
-            onChange={(e) => setAmount(Number(e.target.value))}
-          />
-          <Button
-            className="mt-3 w-full"
-            onClick={() =>
-              dispatch(
-                actions.adminAdjustCredit({
-                  adminId: admin.id,
-                  userId: u.id,
-                  amount,
-                  note: `Điều chỉnh thủ công ${amount} Credit`,
-                  ref: `adjust_${crypto.randomUUID()}`,
-                }),
-              )
-            }
-          >
-            Xác nhận điều chỉnh
-          </Button>
-        </aside>
+      <div className="space-y-6">
+        <section className="grid gap-5 rounded-lg bg-white p-5 ring-1 ring-border/80 sm:grid-cols-3">
+          <Stat label="Credit khả dụng" value={u.availableCredit} />
+          <Stat label="Credit đang giữ" value={u.holdCredit} />
+          <Stat label="Tổng giao dịch" value={txs.length} />
+        </section>
+        <section>
+          <h2 className="mb-3 section-title">Lịch sử Credit</h2>
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Thời gian</th>
+                  <th>Nội dung</th>
+                  <th>Thay đổi</th>
+                  <th>Số dư</th>
+                </tr>
+              </thead>
+              <tbody>
+                {creditHistory.map((entry) => (
+                  <tr key={entry.id}>
+                    <td>{new Date(entry.createdAt).toLocaleString('vi-VN')}</td>
+                    <td>{entry.note}</td>
+                    <td className={entry.amount < 0 ? 'text-error' : 'text-success'}>
+                      {entry.amount > 0 ? '+' : ''}
+                      {entry.amount}
+                    </td>
+                    <td>{entry.balance}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <section>
+          <h2 className="mb-3 section-title">Giao dịch gần đây</h2>
+          <div className="table-wrap">
+            <table className="data-table">
+              <tbody>
+                {txs.map((tx) => (
+                  <tr key={tx.id}>
+                    <td>
+                      <Link
+                        className="font-semibold text-primary"
+                        to={`/admin/transactions/${tx.id}`}
+                      >
+                        {tx.id}
+                      </Link>
+                    </td>
+                    <td>{data.items.find((i) => i.id === tx.itemId)?.title}</td>
+                    <td>
+                      <StatusBadge status={tx.status} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
       </div>
     </Panel>
   );
@@ -425,7 +426,7 @@ export function AdminTransactions() {
           <option value="SCHEDULE_CONFIRMED">Đã chốt lịch</option>
           <option value="WAITING_HANDOVER">Chờ bàn giao</option>
           <option value="COMPLETED">Hoàn tất</option>
-          <option value="DISPUTED">Tranh chấp</option>
+          <option value="DISPUTED">Khiếu nại</option>
         </select>
       </FilterBar>
       <div className="table-wrap">
@@ -557,12 +558,13 @@ export function AdminFinance() {
       title="Báo cáo tài chính"
       description="Credit phát hành, đang giữ và các yêu cầu nạp tiền."
     >
-      <div className="grid gap-5 sm:grid-cols-3">
+      <div className="grid gap-5 sm:grid-cols-4">
         <Stat
           label="Credit toàn hệ thống"
           value={data.users.reduce((s, u) => s + u.totalCredit, 0)}
         />
         <Stat label="Credit đang giữ" value={data.users.reduce((s, u) => s + u.holdCredit, 0)} />
+        <Stat label="Doanh thu hệ thống" value={data.systemRevenue} />
         <Stat label="Top-up chờ duyệt" value={pending.length} />
       </div>
       <h2 className="mb-3 mt-8 section-title">Yêu cầu top-up</h2>
@@ -614,12 +616,88 @@ export function AdminFinance() {
   );
 }
 
+export function AdminFinanceUserLookup() {
+  const data = useAppSelector(selectData);
+  const [query, setQuery] = useState('');
+  const normalized = query.trim().toLowerCase();
+  const rows = normalized
+    ? data.users.filter((user) =>
+        `${user.name} ${user.username} ${user.email} ${user.phone}`
+          .toLowerCase()
+          .includes(normalized),
+      )
+    : [];
+  return (
+    <Panel
+      title="Tra cứu người dùng"
+      description="Tìm người dùng trước khi xem chi tiết tài chính và lịch sử giao dịch."
+    >
+      <FilterBar>
+        <div className="flex-1">
+          <SearchField
+            placeholder="Tìm theo tên, email, số điện thoại hoặc tên tài khoản..."
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </div>
+      </FilterBar>
+      {rows.length ? (
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Người dùng</th>
+                <th>Username</th>
+                <th>Email</th>
+                <th>SĐT</th>
+                <th>Credit khả dụng</th>
+                <th>Credit đang giữ</th>
+                <th>Trạng thái</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((user) => (
+                <tr key={user.id}>
+                  <td>
+                    <div className="flex items-center gap-2">
+                      <Avatar user={user} />
+                      <span className="font-semibold">{user.name}</span>
+                    </div>
+                  </td>
+                  <td>{user.username}</td>
+                  <td>{user.email}</td>
+                  <td>{user.phone}</td>
+                  <td>{user.availableCredit}</td>
+                  <td>{user.holdCredit}</td>
+                  <td><StatusBadge status={user.status} /></td>
+                  <td>
+                    <Link to={`/admin/finance/users/${user.id}`}>
+                      <Button size="sm" variant="outline">Xem chi tiết</Button>
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <EmptyState
+          icon="search"
+          title={query ? 'Không tìm thấy người dùng' : 'Nhập từ khóa để tra cứu'}
+          text="Kết quả sẽ hiển thị sau khi bạn nhập tên, email, số điện thoại hoặc username."
+        />
+      )}
+    </Panel>
+  );
+}
+
 export function AdminSettings() {
   const data = useAppSelector(selectData);
   const admin = useAppSelector(selectCurrentUser)!;
   const dispatch = useAppDispatch();
   const [fee, setFee] = useState(
-    Number(data.settings.find((s) => s.key === 'tx_fee_credit')?.value ?? 5),
+    Number(data.settings.find((s) => s.key === 'tx_fee_credit')?.value ?? 2000),
   );
   return (
     <Panel title="Phí & hạn mức" description="Cấu hình áp dụng cho các giao dịch mới.">
@@ -630,7 +708,7 @@ export function AdminSettings() {
             label="Phí giao dịch (Credit)"
             value={fee}
             onChange={(e) => setFee(Number(e.target.value))}
-            hint="TRADE: cả hai bên. GIFT: người nhận."
+            hint="Swap: 2.000 mỗi bên. Give: người nhận 4.000."
           />
           <Field
             type="number"
@@ -641,7 +719,7 @@ export function AdminSettings() {
           />
         </div>
         <div className="mt-5 rounded-md bg-primary-faint p-4 text-sm text-text-secondary">
-          1 Credit = 1.000 VND. Việc đổi cấu hình không tác động ngược lên giao dịch đã tạo.
+          1 Credit = 1 VND. Swap thu 2.000 Credit mỗi bên; Give thu 4.000 Credit từ người nhận.
         </div>
         <Button
           className="mt-5"
@@ -717,123 +795,444 @@ export function AdminContentPage({
     | 'alerts'
     | 'ranks';
 }) {
+  if (kind === 'keywords') return <AdminKeywords />;
+  if (kind === 'districts') return <AdminDistricts />;
+  if (kind === 'disputes') return <AdminComplaints />;
+  if (kind === 'ranks') return <AdminRanks />;
+  if (kind === 'reputation') return <AdminReputation />;
+  return <AdminStaticContent kind={kind} />;
+}
+
+function AdminKeywords() {
+  const data = useAppSelector(selectData);
+  const admin = useAppSelector(selectCurrentUser)!;
+  const dispatch = useAppDispatch();
+  const [editing, setEditing] = useState<ForbiddenKeyword | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<ForbiddenKeyword | null>(null);
+  return (
+    <Panel
+      title="Từ khóa cấm"
+      description="Các cụm từ được dùng khi kiểm tra nội dung bài đăng."
+      action={<Button icon="add" onClick={() => setEditing({ id: '', keyword: '', detections: 0, action: 'flag' })}>Thêm từ khóa</Button>}
+    >
+      <div className="table-wrap">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Từ khóa</th>
+              <th>Số lần phát hiện</th>
+              <th>Mức xử lý</th>
+              <th>Thao tác</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.keywords.map((keyword) => (
+              <tr key={keyword.id}>
+                <td className="font-semibold">{keyword.keyword}</td>
+                <td>{keyword.detections}</td>
+                <td>{keyword.action === 'block' ? 'Chặn bài' : 'Tự động gắn cờ'}</td>
+                <td className="space-x-2">
+                  <Button size="sm" variant="ghost" onClick={() => setEditing(keyword)}>Sửa</Button>
+                  <Button size="sm" variant="danger" onClick={() => setConfirmDelete(keyword)}>Xóa</Button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {editing ? (
+        <KeywordModal
+          keyword={editing}
+          onClose={() => setEditing(null)}
+          onSave={(keyword, action) => {
+            if (editing.id) {
+              dispatch(actions.updateKeyword({ adminId: admin.id, id: editing.id, keyword, action }));
+            } else {
+              dispatch(actions.addKeyword({ adminId: admin.id, keyword, action }));
+            }
+            setEditing(null);
+          }}
+        />
+      ) : null}
+      {confirmDelete ? (
+        <ConfirmDialog
+          title="Xóa từ khóa?"
+          text={`Từ khóa "${confirmDelete.keyword}" sẽ không còn được dùng để kiểm tra bài đăng.`}
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={() => {
+            dispatch(actions.deleteKeyword({ adminId: admin.id, id: confirmDelete.id }));
+            setConfirmDelete(null);
+          }}
+        />
+      ) : null}
+    </Panel>
+  );
+}
+
+function KeywordModal({
+  keyword,
+  onClose,
+  onSave,
+}: {
+  keyword: ForbiddenKeyword;
+  onClose: () => void;
+  // eslint-disable-next-line no-unused-vars
+  onSave: (..._args: [string, KeywordAction]) => void;
+}) {
+  const [value, setValue] = useState(keyword.keyword);
+  const [action, setAction] = useState<KeywordAction>(keyword.action);
+  return (
+    <Modal title={keyword.id ? 'Sửa từ khóa' : 'Thêm từ khóa'} onClose={onClose}>
+      <Field label="Từ khóa" value={value} onChange={(event) => setValue(event.target.value)} />
+      <Select
+        className="mt-4"
+        label="Mức xử lý"
+        value={action}
+        onChange={(event) => setAction(event.target.value as KeywordAction)}
+      >
+        <option value="flag">Tự động gắn cờ</option>
+        <option value="block">Chặn bài</option>
+      </Select>
+      <div className="mt-6 flex justify-end gap-2">
+        <Button variant="ghost" onClick={onClose}>Hủy</Button>
+        <Button onClick={() => onSave(value, action)}>Lưu</Button>
+      </div>
+    </Modal>
+  );
+}
+
+function AdminDistricts() {
+  const data = useAppSelector(selectData);
+  const admin = useAppSelector(selectCurrentUser)!;
+  const dispatch = useAppDispatch();
+  const [editing, setEditing] = useState<SupportedDistrict | null>(null);
+  const [error, setError] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState<SupportedDistrict | null>(null);
+  return (
+    <Panel
+      title="Khu vực"
+      description="Danh sách khu vực dùng chung cho tìm đồ, trợ lý AI và đăng đồ."
+      action={<Button icon="add" onClick={() => setEditing({ id: '', name: '', status: 'active' })}>Thêm khu vực</Button>}
+    >
+      {error ? <div className="mb-4 rounded-md bg-red-50 px-4 py-3 text-sm text-error">{error}</div> : null}
+      <div className="table-wrap">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Khu vực</th>
+              <th>Số món</th>
+              <th>Trạng thái</th>
+              <th>Thao tác</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.districts.map((district) => (
+              <tr key={district.id}>
+                <td className="font-semibold">{district.name}</td>
+                <td>{data.items.filter((item) => item.district === district.name).length}</td>
+                <td>Đang hỗ trợ</td>
+                <td className="space-x-2">
+                  <Button size="sm" variant="ghost" onClick={() => setEditing(district)}>Sửa</Button>
+                  <Button size="sm" variant="danger" onClick={() => setConfirmDelete(district)}>Xóa</Button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {editing ? (
+        <DistrictModal
+          district={editing}
+          onClose={() => setEditing(null)}
+          onSave={(name) => {
+            const duplicate = data.districts.some(
+              (entry) => entry.id !== editing.id && entry.name.toLowerCase() === name.trim().toLowerCase(),
+            );
+            if (duplicate) {
+              setError('Khu vực đã tồn tại.');
+              return;
+            }
+            if (editing.id) dispatch(actions.updateDistrict({ adminId: admin.id, id: editing.id, name }));
+            else dispatch(actions.addDistrict({ adminId: admin.id, name }));
+            setError('');
+            setEditing(null);
+          }}
+        />
+      ) : null}
+      {confirmDelete ? (
+        <ConfirmDialog
+          title="Xóa khu vực?"
+          text={`Khu vực "${confirmDelete.name}" sẽ biến mất khỏi các dropdown tìm kiếm và đăng đồ.`}
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={() => {
+            dispatch(actions.deleteDistrict({ adminId: admin.id, id: confirmDelete.id }));
+            setConfirmDelete(null);
+          }}
+        />
+      ) : null}
+    </Panel>
+  );
+}
+
+function DistrictModal({
+  district,
+  onClose,
+  onSave,
+}: {
+  district: SupportedDistrict;
+  onClose: () => void;
+  // eslint-disable-next-line no-unused-vars
+  onSave: (..._args: [string]) => void;
+}) {
+  const [name, setName] = useState(district.name);
+  return (
+    <Modal title={district.id ? 'Sửa khu vực' : 'Thêm khu vực'} onClose={onClose}>
+      <Field label="Tên khu vực" value={name} onChange={(event) => setName(event.target.value)} />
+      <div className="mt-6 flex justify-end gap-2">
+        <Button variant="ghost" onClick={onClose}>Hủy</Button>
+        <Button onClick={() => onSave(name)}>Lưu</Button>
+      </div>
+    </Modal>
+  );
+}
+
+function AdminComplaints() {
+  const data = useAppSelector(selectData);
+  const admin = useAppSelector(selectCurrentUser)!;
+  const dispatch = useAppDispatch();
+  const [selectedId, setSelectedId] = useState('');
+  const [note, setNote] = useState('');
+  const [resolution, setResolution] = useState('');
+  const selected = data.complaints.find((entry) => entry.id === selectedId);
+  const statusLabel: Record<ComplaintStatus, string> = {
+    received: 'Đã tiếp nhận',
+    processing: 'Đang xử lý',
+    resolved: 'Đã xử lý',
+  };
+  return (
+    <Panel title="Khiếu nại" description="Hồ sơ giao dịch cần quản trị viên xem xét và xử lý.">
+      <div className="table-wrap">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Mã</th>
+              <th>Người gửi</th>
+              <th>Giao dịch</th>
+              <th>Lý do</th>
+              <th>Ngày gửi</th>
+              <th>Trạng thái</th>
+              <th>Thao tác</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.complaints.map((complaint) => (
+              <tr key={complaint.id}>
+                <td className="font-semibold">{complaint.id}</td>
+                <td>{data.users.find((user) => user.id === complaint.reporterId)?.name}</td>
+                <td>{complaint.transactionId}</td>
+                <td>{complaint.reason}</td>
+                <td>{new Date(complaint.createdAt).toLocaleDateString('vi-VN')}</td>
+                <td>{statusLabel[complaint.status]}</td>
+                <td>
+                  <Button size="sm" variant="outline" onClick={() => {
+                    setSelectedId(complaint.id);
+                    setNote(complaint.adminNote ?? '');
+                    setResolution(complaint.resolution ?? '');
+                  }}>
+                    Xem chi tiết
+                  </Button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {selected ? (
+        <Modal title={`Khiếu nại ${selected.id}`} onClose={() => setSelectedId('')}>
+          <div className="grid gap-3 text-sm">
+            <Info label="Người gửi" value={data.users.find((user) => user.id === selected.reporterId)?.name ?? selected.reporterId} />
+            <Info label="Người bị khiếu nại" value={data.users.find((user) => user.id === selected.reportedUserId)?.name ?? selected.reportedUserId} />
+            <Info label="Giao dịch liên quan" value={selected.transactionId} />
+            <Info label="Trạng thái" value={statusLabel[selected.status]} />
+          </div>
+          <div className="mt-4 rounded-md bg-background p-3 text-sm leading-6 text-text-secondary">
+            <strong className="text-text-primary">{selected.reason}</strong>
+            <p className="mt-1">{selected.content}</p>
+          </div>
+          {selected.evidence.length ? (
+            <div className="mt-4 grid grid-cols-3 gap-2">
+              {selected.evidence.map((source, index) => (
+                source.startsWith('data:video') ? (
+                  <video key={source.slice(-16) + index} src={source} className="aspect-square rounded-md object-cover" controls />
+                ) : (
+                  <img key={source.slice(-16) + index} src={source} alt="Bằng chứng" className="aspect-square rounded-md object-cover" />
+                )
+              ))}
+            </div>
+          ) : null}
+          <TextArea className="mt-4" label="Ghi chú xử lý" value={note} onChange={(event) => setNote(event.target.value)} />
+          <TextArea className="mt-4" label="Kết quả xử lý" value={resolution} onChange={(event) => setResolution(event.target.value)} />
+          <div className="mt-6 flex flex-wrap justify-end gap-2">
+            <Button variant="ghost" onClick={() => setSelectedId('')}>Đóng</Button>
+            {selected.status === 'received' ? (
+              <Button
+                onClick={() => dispatch(actions.updateComplaintStatus({ adminId: admin.id, complaintId: selected.id, status: 'processing', adminNote: note }))}
+              >
+                Chuyển đang xử lý
+              </Button>
+            ) : null}
+            {selected.status === 'processing' ? (
+              <Button
+                onClick={() => {
+                  dispatch(actions.updateComplaintStatus({ adminId: admin.id, complaintId: selected.id, status: 'resolved', adminNote: note, resolution }));
+                  setSelectedId('');
+                }}
+              >
+                Đánh dấu đã xử lý
+              </Button>
+            ) : null}
+          </div>
+        </Modal>
+      ) : null}
+    </Panel>
+  );
+}
+
+function AdminRanks() {
+  const data = useAppSelector(selectData);
+  const admin = useAppSelector(selectCurrentUser)!;
+  const dispatch = useAppDispatch();
+  const [editing, setEditing] = useState<RankRule | null>(null);
+  const rows = [...data.ranks].sort((a, b) => a.minPoints - b.minPoints);
+  return (
+    <Panel title="Mốc hạng" description="Cấu hình khoảng điểm dùng để xác định hạng thành viên.">
+      <div className="table-wrap">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Tên hạng</th>
+              <th>Khoảng điểm</th>
+              <th>Mốc tối thiểu</th>
+              <th>Thao tác</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((rank) => (
+              <tr key={rank.id}>
+                <td className="font-semibold">{rank.name}</td>
+                <td>{rank.minPoints}–{rank.maxPoints ?? '+'}</td>
+                <td>{rank.minPoints}</td>
+                <td><Button size="sm" variant="ghost" onClick={() => setEditing(rank)}>Sửa</Button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {editing ? (
+        <RankModal
+          rank={editing}
+          onClose={() => setEditing(null)}
+          onSave={(name, minPoints, maxPoints) => {
+            dispatch(actions.updateRankRule({ adminId: admin.id, id: editing.id, name, minPoints, maxPoints }));
+            setEditing(null);
+          }}
+        />
+      ) : null}
+    </Panel>
+  );
+}
+
+function RankModal({
+  rank,
+  onClose,
+  onSave,
+}: {
+  rank: RankRule;
+  onClose: () => void;
+  // eslint-disable-next-line no-unused-vars
+  onSave: (..._args: [string, number, number?]) => void;
+}) {
+  const [name, setName] = useState(rank.name);
+  const [minPoints, setMinPoints] = useState(rank.minPoints);
+  const [maxPoints, setMaxPoints] = useState(rank.maxPoints ?? '');
+  return (
+    <Modal title="Sửa mốc hạng" onClose={onClose}>
+      <Field label="Tên hạng" value={name} onChange={(event) => setName(event.target.value)} />
+      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+        <Field label="Điểm tối thiểu" type="number" value={minPoints} onChange={(event) => setMinPoints(Number(event.target.value))} />
+        <Field label="Điểm tối đa" type="number" value={maxPoints} onChange={(event) => setMaxPoints(event.target.value === '' ? '' : Number(event.target.value))} />
+      </div>
+      <div className="mt-6 flex justify-end gap-2">
+        <Button variant="ghost" onClick={onClose}>Hủy</Button>
+        <Button onClick={() => onSave(name, minPoints, maxPoints === '' ? undefined : Number(maxPoints))}>Lưu thay đổi</Button>
+      </div>
+    </Modal>
+  );
+}
+
+function AdminReputation() {
+  const data = useAppSelector(selectData);
+  return (
+    <Panel title="Uy tín & Hạng" description="TrustStars và điểm hạng được theo dõi riêng biệt.">
+      <div className="table-wrap">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Người dùng</th>
+              <th>TrustStars</th>
+              <th>Điểm hạng</th>
+              <th>Hạng hiện tại</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.users.filter((user) => user.role !== 'admin').map((user) => (
+              <tr key={user.id}>
+                <td className="font-semibold">{user.name}</td>
+                <td>{user.reputationStars.toFixed(1)} ★</td>
+                <td>{user.rewardPoints}</td>
+                <td>{user.rank}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
+  );
+}
+
+function AdminStaticContent({
+  kind,
+}: {
+  kind: 'expired' | 'categories' | 'locked' | 'alerts';
+}) {
   const data = useAppSelector(selectData);
   const configs = {
     expired: ['Bài quá hạn', 'Theo dõi và xử lý các bài đã hết thời gian hiển thị.'],
     categories: ['Danh mục', 'Quản lý cấu trúc danh mục dùng chung toàn hệ thống.'],
-    keywords: ['Từ khóa cấm', 'Các cụm từ được dùng khi kiểm tra nội dung bài đăng.'],
-    districts: ['Khu vực', 'Danh sách quận được hỗ trợ trong tìm kiếm và giao nhận.'],
-    reputation: ['Uy tín & hạng', 'Theo dõi điểm, hạng và mức độ tin cậy của thành viên.'],
     locked: ['Tài khoản bị khóa', 'Các tài khoản bị hạn chế truy cập hệ thống.'],
-    disputes: ['Tranh chấp', 'Hồ sơ giao dịch cần quản trị viên xem xét.'],
     alerts: ['Cảnh báo bất thường', 'Tín hiệu cần kiểm tra từ hoạt động giao dịch và Credit.'],
-    ranks: ['Mốc hạng', 'Cấu hình các mốc Reward Points cho hạng thành viên.'],
   } as const;
   const [title, description] = configs[kind];
-  let content: ReactNode;
-  if (kind === 'categories')
-    content = (
-      <SimpleRows
-        rows={CATEGORIES.map((name, i) => [
-          name,
-          `${data.items.filter((x) => x.category === name).length} bài`,
-          i % 3 === 0 ? 'Đang nổi bật' : 'Đang dùng',
-        ])}
-      />
-    );
-  else if (kind === 'districts')
-    content = (
-      <SimpleRows
-        rows={DISTRICTS.map((name) => [
-          name,
-          `${data.items.filter((x) => x.district === name).length} món`,
-          'Đang hỗ trợ',
-        ])}
-      />
-    );
-  else if (kind === 'keywords')
-    content = (
-      <SimpleRows
-        rows={['hàng cấm', 'vũ khí', 'thuốc kê đơn', 'thông tin liên hệ'].map((name, i) => [
-          name,
-          `${[3, 1, 2, 7][i]} lần phát hiện`,
-          'Tự động gắn cờ',
-        ])}
-      />
-    );
-  else if (kind === 'reputation')
-    content = (
-      <SimpleRows
-        rows={data.users
-          .filter((u) => u.role !== 'admin')
-          .map((u) => [
-            u.name,
-            `${u.rewardPoints} Reward Points`,
-            `${u.reputationStars} sao · ${u.rank}`,
-          ])}
-      />
-    );
-  else if (kind === 'locked')
-    content = (
-      <SimpleRows
-        rows={data.users
-          .filter((u) => u.status === 'locked')
-          .map((u) => [u.name, u.email, 'Đã khóa'])}
-        empty="Không có tài khoản nào đang bị khóa."
-      />
-    );
-  else if (kind === 'expired')
-    content = (
-      <SimpleRows
-        rows={data.items
-          .filter((i) => i.status === 'expired')
-          .map((i) => [i.title, i.district, new Date(i.expiresAt).toLocaleDateString('vi-VN')])}
-        empty="Hiện không có bài quá hạn."
-      />
-    );
-  else if (kind === 'disputes')
-    content = (
-      <SimpleRows
-        rows={data.disputes.map((d) => [d.id, d.reason, d.status])}
-        empty="Không có tranh chấp đang mở."
-      />
-    );
-  else if (kind === 'alerts')
-    content = (
-      <SimpleRows
-        rows={data.transactions
-          .filter((t) => t.status === 'DISPUTED' || t.creditHeldBy.length > 1)
-          .map((t) => [
-            t.id,
-            t.status === 'DISPUTED' ? 'Giao dịch có tranh chấp' : 'Nhiều bên đã giữ Credit',
-            t.status,
-          ])}
-      />
-    );
-  else
-    content = (
-      <SimpleRows
-        rows={[
-          [0, 'Thành viên mới', '0-99 điểm'],
-          [100, 'Đồng hành', '100-299 điểm'],
-          [300, 'Tin cậy', '300-699 điểm'],
-          [700, 'Đại sứ', '700+ điểm'],
-        ].map((r) => [String(r[1]), String(r[2]), `Mốc ${r[0]}`])}
-      />
-    );
+  const rows =
+    kind === 'categories'
+      ? CATEGORIES.map((name) => [name, `${data.items.filter((x) => x.category === name).length} bài`, 'Đang dùng'])
+      : kind === 'locked'
+        ? data.users.filter((u) => u.status === 'locked').map((u) => [u.name, u.email, 'Đã khóa'])
+        : kind === 'expired'
+          ? data.items.filter((i) => i.status === 'expired').map((i) => [i.title, i.district, new Date(i.expiresAt).toLocaleDateString('vi-VN')])
+          : data.transactions.filter((t) => t.status === 'DISPUTED' || t.creditHeldBy.length > 1).map((t) => [
+              t.id,
+              t.status === 'DISPUTED' ? 'Giao dịch có khiếu nại' : 'Nhiều bên đã giữ Credit',
+              t.status,
+            ]);
   return (
     <Panel title={title} description={description}>
-      {content}
+      <SimpleRows rows={rows} />
     </Panel>
   );
 }
-function SimpleRows({
-  rows,
-  empty = 'Chưa có dữ liệu phù hợp.',
-}: {
-  rows: string[][];
-  empty?: string;
-}) {
+
+function SimpleRows({ rows }: { rows: string[][] }) {
   return rows.length ? (
     <div className="table-wrap">
       <table className="data-table">
@@ -856,9 +1255,45 @@ function SimpleRows({
       </table>
     </div>
   ) : (
-    <div className="rounded-lg border border-dashed border-border bg-white p-10 text-center text-sm text-text-muted">
-      {empty}
+    <EmptyState title="Chưa có dữ liệu phù hợp" text="Các bản ghi mới sẽ xuất hiện tại đây." />
+  );
+}
+
+function Modal({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-40 grid place-items-end bg-black/30 sm:place-items-center sm:p-4">
+      <div className="max-h-[92dvh] w-full overflow-y-auto rounded-t-xl bg-white p-5 shadow-lg sm:max-w-xl sm:rounded-xl sm:p-6">
+        <div className="flex items-center justify-between gap-4">
+          <h2 className="text-xl font-bold">{title}</h2>
+          <button onClick={onClose} className="grid size-9 place-items-center rounded-md text-text-muted hover:bg-surface-low">
+            <Icon name="close" className="size-5" />
+          </button>
+        </div>
+        <div className="mt-5">{children}</div>
+      </div>
     </div>
+  );
+}
+
+function ConfirmDialog({
+  title,
+  text,
+  onCancel,
+  onConfirm,
+}: {
+  title: string;
+  text: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Modal title={title} onClose={onCancel}>
+      <p className="text-sm leading-6 text-text-muted">{text}</p>
+      <div className="mt-6 flex justify-end gap-2">
+        <Button variant="ghost" onClick={onCancel}>Hủy</Button>
+        <Button variant="danger" onClick={onConfirm}>Xóa</Button>
+      </div>
+    </Modal>
   );
 }
 function Info({ label, value }: { label: string; value: string }) {

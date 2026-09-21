@@ -17,7 +17,7 @@ const sections = [
     label: 'Người dùng',
     items: [
       ['group', 'Danh sách người dùng', '/admin/users'],
-      ['star', 'Uy tín & hạng', '/admin/reputation'],
+      ['star', 'Uy tín & Hạng', '/admin/reputation'],
       ['close', 'Khóa tài khoản', '/admin/locked-users'],
     ],
   },
@@ -25,7 +25,7 @@ const sections = [
     label: 'Giao dịch',
     items: [
       ['transaction', 'Giao dịch', '/admin/transactions'],
-      ['shield', 'Tranh chấp', '/admin/disputes'],
+      ['shield', 'Khiếu nại', '/admin/complaints'],
       ['activity', 'Cảnh báo bất thường', '/admin/alerts'],
     ],
   },
@@ -33,7 +33,7 @@ const sections = [
     label: 'Tài chính',
     items: [
       ['payments', 'Báo cáo tài chính', '/admin/finance'],
-      ['search', 'Tra cứu người dùng', '/admin/finance/users/user_001'],
+      ['search', 'Tra cứu người dùng', '/admin/finance/users'],
     ],
   },
   {

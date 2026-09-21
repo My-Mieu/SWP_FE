@@ -1,15 +1,18 @@
 import { type FormEvent, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useAppDispatch } from '../../app/hooks';
-import { actions } from '../../app/store';
+import { useAppDispatch, useAppSelector } from '../../app/hooks';
+import { actions, selectData } from '../../app/store';
 import { Button, Field, Select } from '../../components/ui';
-import { DISTRICTS } from '../../constants/domain';
 export function Register() {
+  const data = useAppSelector(selectData);
+  const districts = data.districts
+    .filter((entry) => entry.status === 'active')
+    .map((entry) => entry.name);
   const [step, setStep] = useState<'details' | 'otp'>('details');
   const [name, setName] = useState('');
   const [username, setUsername] = useState('');
   const [phone, setPhone] = useState('');
-  const [district, setDistrict] = useState<string>(DISTRICTS[0]);
+  const [district, setDistrict] = useState<string>(districts[0] ?? '');
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
@@ -68,7 +71,7 @@ export function Register() {
               />
             </div>
             <Select label="Quận" value={district} onChange={(e) => setDistrict(e.target.value)}>
-              {DISTRICTS.map((d) => (
+              {districts.map((d) => (
                 <option key={d}>{d}</option>
               ))}
             </Select>

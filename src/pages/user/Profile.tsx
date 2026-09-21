@@ -12,7 +12,6 @@ import {
   Select,
   Stat,
 } from '../../components/ui';
-import { DISTRICTS } from '../../constants/domain';
 import { formatCredit, formatVnd } from '../../utils/formatting';
 import { fileToDataUrl } from '../../utils/files';
 export function Profile() {
@@ -29,6 +28,9 @@ export function Profile() {
   const [showQr, setShowQr] = useState(false);
   const history = data.creditHistory.filter((h) => h.userId === user.id);
   const topups = data.topups.filter((t) => t.userId === user.id);
+  const districts = data.districts
+    .filter((entry) => entry.status === 'active')
+    .map((entry) => entry.name);
   const save = () =>
     dispatch(actions.updateProfile({ userId: user.id, name, email, phone, district, avatarUrl }));
   return (
@@ -53,7 +55,7 @@ export function Profile() {
               [
                 ['profile', 'Hồ sơ', 'user'],
                 ['credit', 'Credit', 'wallet'],
-                ['reputation', 'Uy tín & hạng', 'star'],
+                ['reputation', 'Uy tín & Hạng', 'star'],
               ] as const
             ).map(([id, label, icon]) =>
               id === 'credit' ? (
@@ -118,7 +120,7 @@ export function Profile() {
                   onChange={(e) => setPhone(e.target.value)}
                 />
                 <Select label="Quận" value={district} onChange={(e) => setDistrict(e.target.value)}>
-                  {DISTRICTS.map((d) => (
+                  {districts.map((d) => (
                     <option key={d}>{d}</option>
                   ))}
                 </Select>
@@ -148,11 +150,11 @@ export function Profile() {
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <h2 className="section-title">Nạp Credit</h2>
-                      <p className="mt-1 text-xs text-text-muted">1.000 VND = 1 Credit</p>
+                      <p className="mt-1 text-xs text-text-muted">1 VND = 1 Credit</p>
                     </div>
                   </div>
                   <div className="mt-4 grid grid-cols-3 gap-2 sm:grid-cols-6">
-                    {[5000, 10000, 20000, 50000, 100000, 200000].map((v) => (
+                    {[10000, 20000, 50000, 100000, 200000].map((v) => (
                       <button
                         key={v}
                         onClick={() => setAmount(v)}

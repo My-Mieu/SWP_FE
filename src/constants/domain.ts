@@ -55,7 +55,7 @@ export const ADMIN_ROUTES = [
   '/admin/reputation',
   '/admin/locked-users',
   '/admin/transactions',
-  '/admin/disputes',
+  '/admin/complaints',
   '/admin/alerts',
   '/admin/finance',
   '/admin/settings/fees',

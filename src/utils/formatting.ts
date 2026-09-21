@@ -16,7 +16,7 @@ export const txLabel: Record<TransactionStatus, string> = {
   RECEIVER_CONFIRMED: 'Bên nhận đã xác nhận',
   COMPLETED: 'Hoàn tất',
   CANCELLED: 'Đã hủy',
-  DISPUTED: 'Tranh chấp',
+  DISPUTED: 'Khiếu nại',
 };
 
 export function formatCredit(value: number) {

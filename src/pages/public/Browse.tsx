@@ -11,12 +11,14 @@ import {
   SearchField,
   Select,
 } from '../../components/ui';
-import { CATEGORIES, CONDITIONS, DISTRICTS } from '../../constants/domain';
+import { CATEGORIES, CONDITIONS } from '../../constants/domain';
 import { conditionLabel } from '../../utils/formatting';
 import type { ItemCondition, ItemType } from '../../types/domain';
 export function Browse() {
   const [params] = useSearchParams();
-  const { items, users } = useAppSelector(selectData);
+  const data = useAppSelector(selectData);
+  const { items, users } = data;
+  const districts = useMemo(() => dataDistricts(data), [data]);
   const [q, setQ] = useState(params.get('q') ?? '');
   const typeParam = params.get('type');
   const [type, setType] = useState<ItemType | ''>(
@@ -80,7 +82,7 @@ export function Browse() {
       </Select>
       <Select label="Quận" value={district} onChange={(e) => setDistrict(e.target.value)}>
         <option value="">Tất cả quận</option>
-        {DISTRICTS.map((d) => (
+        {districts.map((d) => (
           <option key={d}>{d}</option>
         ))}
       </Select>
@@ -150,4 +152,8 @@ export function Browse() {
       </div>
     </div>
   );
+}
+
+function dataDistricts(data: ReturnType<typeof selectData>) {
+  return data.districts.filter((district) => district.status === 'active').map((district) => district.name);
 }

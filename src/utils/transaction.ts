@@ -32,7 +32,7 @@ export function progressIndex(status: TransactionStatus) {
     WAITING_HANDOVER: 4,
     SENDER_CONFIRMED: 4,
     RECEIVER_CONFIRMED: 4,
-    COMPLETED: 4,
+    COMPLETED: 5,
     CANCELLED: 2,
     DISPUTED: 4,
   };

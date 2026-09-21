@@ -1,8 +1,18 @@
-import { useState } from 'react';
-import { Link, NavLink, Outlet } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../app/hooks';
 import { actions, selectCurrentUser } from '../app/store';
 import { Avatar, Button, Icon, IconButton } from '../components/ui';
+
+function ScrollToTop() {
+  const { pathname } = useLocation();
+
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [pathname]);
+
+  return null;
+}
 
 export function AppShell() {
   const user = useAppSelector(selectCurrentUser);
@@ -28,6 +38,7 @@ export function AppShell() {
   };
   return (
     <div className="flex min-h-screen flex-col">
+      <ScrollToTop />
       <a
         href="#main-content"
         className="fixed left-3 top-3 z-50 -translate-y-20 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-white focus:translate-y-0"
