@@ -1,0 +1,108 @@
+@import url('https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-primary: #145c4e;
+  --color-background: #f5f7f6;
+  --color-surface: #fff;
+  --color-text-primary: #17211e;
+  --color-text-muted: #73807b;
+  --color-border: #d7dedb;
+  color-scheme: light;
+  font-synthesis: none;
+}
+* {
+  box-sizing: border-box;
+}
+html {
+  scroll-behavior: smooth;
+}
+body {
+  margin: 0;
+  min-width: 320px;
+  overflow-x: hidden;
+  background: var(--color-background);
+  color: var(--color-text-primary);
+  font-family: 'Be Vietnam Pro', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+img {
+  display: block;
+  max-width: 100%;
+}
+::selection {
+  background: #cde4dc;
+  color: #0f4a3f;
+}
+:focus-visible {
+  outline: 3px solid rgba(20, 92, 78, 0.2);
+  outline-offset: 2px;
+}
+
+@layer components {
+  .page-shell {
+    @apply mx-auto w-full max-w-[1280px] px-4 py-8 sm:px-6 sm:py-10 lg:px-8 lg:py-12;
+  }
+  .page-title {
+    @apply text-2xl font-bold leading-tight text-text-primary sm:text-3xl;
+  }
+  .page-intro {
+    @apply mt-2 max-w-2xl text-sm leading-6 text-text-muted sm:text-base;
+  }
+  .section-title {
+    @apply text-lg font-bold leading-tight text-text-primary sm:text-xl;
+  }
+  .card {
+    @apply rounded-lg bg-white ring-1 ring-border/80 shadow-sm;
+  }
+  .input {
+    @apply min-h-11 w-full rounded-md border border-border bg-white px-3.5 py-2.5 text-sm text-text-primary outline-none transition duration-200 placeholder:text-text-muted/70 hover:border-text-muted focus:border-primary focus:ring-4 focus:ring-primary/10 disabled:cursor-not-allowed disabled:bg-surface-low;
+  }
+  .table-wrap {
+    @apply overflow-x-auto rounded-lg bg-white ring-1 ring-border/80;
+  }
+  .data-table {
+    @apply w-full min-w-[720px] border-collapse text-left text-sm;
+  }
+  .data-table thead {
+    @apply bg-surface-low text-xs font-semibold text-text-muted;
+  }
+  .data-table th {
+    @apply whitespace-nowrap px-4 py-3;
+  }
+  .data-table td {
+    @apply px-4 py-3.5 align-middle;
+  }
+  .data-table tbody tr {
+    @apply border-t border-border/70 transition hover:bg-primary-faint;
+  }
+  .label {
+    @apply mb-1.5 block text-xs font-semibold text-text-secondary;
+  }
+  .surface-section {
+    @apply rounded-xl bg-white p-5 ring-1 ring-border/70 sm:p-6;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
