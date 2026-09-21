@@ -14,6 +14,16 @@ export function loadPersistedState(): AppStateData {
       code: topup.code ?? `SLTOPUP-${topup.id.slice(-6).toUpperCase()}`,
       status: (topup.status as string) === 'success' ? 'completed' : topup.status,
     }));
+    parsed.transactions = (parsed.transactions ?? []).map((tx) => ({
+      ...tx,
+      status:
+        tx.status === 'CREDIT_HELD' &&
+        (tx.type === 'gift'
+          ? tx.creditHeldBy.includes(tx.requesterId)
+          : tx.creditHeldBy.includes(tx.ownerId) && tx.creditHeldBy.includes(tx.requesterId))
+          ? 'WAITING_HANDOVER'
+          : tx.status,
+    }));
     const persistedItemIds = new Set((parsed.items ?? []).map((item) => item.id));
     parsed.items = [
       ...(parsed.items ?? []),

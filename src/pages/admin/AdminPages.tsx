@@ -381,6 +381,7 @@ export function AdminUserDetail() {
                   userId: u.id,
                   amount,
                   note: `Điều chỉnh thủ công ${amount} Credit`,
+                  ref: `adjust_${crypto.randomUUID()}`,
                 }),
               )
             }

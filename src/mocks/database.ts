@@ -499,7 +499,7 @@ export const seedTransactions: Transaction[] = [
     requesterId: 'user_001',
     ownerId: 'user_002',
     type: 'trade',
-    status: 'CREDIT_HELD',
+    status: 'WAITING_HANDOVER',
     handoverId: 'ho_001',
     creditHeldBy: ['user_001', 'user_002'],
     senderConfirmed: false,

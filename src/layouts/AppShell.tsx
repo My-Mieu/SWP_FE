@@ -227,7 +227,7 @@ export function AppShell() {
           </div>
           <div className="mt-12 flex flex-col gap-3 border-t border-border pt-6 text-xs text-text-muted sm:flex-row sm:items-center sm:justify-between">
             <p>© 2026 SHARELOOP</p>
-            <p>Tìm theo quận, không dùng GPS.</p>
+          
           </div>
         </div>
       </footer>

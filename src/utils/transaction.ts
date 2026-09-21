@@ -4,17 +4,23 @@ const allowed: Record<TransactionStatus, TransactionStatus[]> = {
   NEGOTIATING: ['SCHEDULE_PROPOSED', 'CANCELLED'],
   SCHEDULE_PROPOSED: ['SCHEDULE_CONFIRMED', 'SCHEDULE_PROPOSED', 'CANCELLED'],
   SCHEDULE_CONFIRMED: ['CREDIT_HELD', 'CANCELLED'],
-  CREDIT_HELD: ['SENDER_CONFIRMED', 'RECEIVER_CONFIRMED', 'DISPUTED', 'CANCELLED'],
+  CREDIT_HELD: ['WAITING_HANDOVER', 'DISPUTED', 'CANCELLED'],
   WAITING_HANDOVER: ['SENDER_CONFIRMED', 'RECEIVER_CONFIRMED', 'DISPUTED', 'CANCELLED'],
-  SENDER_CONFIRMED: ['COMPLETED', 'RECEIVER_CONFIRMED', 'DISPUTED'],
-  RECEIVER_CONFIRMED: ['COMPLETED', 'SENDER_CONFIRMED', 'DISPUTED'],
+  SENDER_CONFIRMED: ['COMPLETED', 'DISPUTED', 'CANCELLED'],
+  RECEIVER_CONFIRMED: ['COMPLETED', 'DISPUTED', 'CANCELLED'],
   COMPLETED: [],
   CANCELLED: [],
-  DISPUTED: ['CANCELLED', 'COMPLETED'],
+  DISPUTED: [],
 };
 
 export function canTransition(tx: Transaction, next: TransactionStatus) {
   return allowed[tx.status].includes(next);
+}
+
+export function transitionTransaction(tx: Transaction, next: TransactionStatus) {
+  if (!canTransition(tx, next)) return false;
+  tx.status = next;
+  return true;
 }
 
 export function progressIndex(status: TransactionStatus) {

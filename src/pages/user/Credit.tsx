@@ -39,13 +39,13 @@ export function Credit() {
   }, [data.creditHistory, historyFilter, user.id]);
 
   const continuePayment = () => {
-    const code = `SLTOPUP-${String(Date.now()).slice(-6)}`;
+    const code = `SLTOPUP-${crypto.randomUUID()}`;
     setTransactionCode(code);
     setStep('qr');
   };
 
   const confirmTransfer = () => {
-    const id = `top_${Date.now()}`;
+    const id = `top_${crypto.randomUUID()}`;
     dispatch(
       actions.topupCredit({
         id,

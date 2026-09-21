@@ -1,24 +1,37 @@
+import { useEffect } from 'react';
 import { Navigate, Outlet } from 'react-router-dom';
-import { useAppSelector } from '../app/hooks';
-import { selectCurrentUser } from '../app/store';
+import { useAppDispatch, useAppSelector } from '../app/hooks';
+import { actions, selectCurrentUser, selectData } from '../app/store';
+
+function useValidSession() {
+  const dispatch = useAppDispatch();
+  const { currentUserId, users } = useAppSelector(selectData);
+  const current = users.find((user) => user.id === currentUserId);
+  const invalid = Boolean(currentUserId && (!current || current.status !== 'active'));
+  useEffect(() => {
+    if (invalid) dispatch(actions.logout());
+  }, [dispatch, invalid]);
+  const user = useAppSelector(selectCurrentUser);
+  return invalid ? null : user;
+}
 
 export function PublicRoute() {
   return <Outlet />;
 }
 
 export function GuestOnlyRoute() {
-  const user = useAppSelector(selectCurrentUser);
+  const user = useValidSession();
   return user ? <Navigate to="/" replace /> : <Outlet />;
 }
 
 export function ProtectedRoute() {
-  const user = useAppSelector(selectCurrentUser);
-  return user ? <Outlet /> : <Navigate to="/login" replace />;
+  const user = useValidSession();
+  return user?.status === 'active' ? <Outlet /> : <Navigate to="/login" replace />;
 }
 
 export function AdminRoute() {
-  const user = useAppSelector(selectCurrentUser);
+  const user = useValidSession();
   if (!user) return <Navigate to="/login" replace />;
-  if (user.role !== 'admin') return <Navigate to="/" replace />;
+  if (user.status !== 'active' || user.role !== 'admin') return <Navigate to="/" replace />;
   return <Outlet />;
 }

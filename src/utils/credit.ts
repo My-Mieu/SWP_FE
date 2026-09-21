@@ -1,4 +1,5 @@
 import type { AppStateData, CreditHistory, Transaction } from '../types/domain';
+import { canTransition, transitionTransaction } from './transaction';
 
 export function txFee(data: AppStateData) {
   const setting = data.settings.find((s) => s.key === 'tx_fee_credit');
@@ -17,7 +18,15 @@ export function calculateTransactionFee(
 
 export function assertWalletInvariant(data: AppStateData) {
   data.users.forEach((user) => {
-    if (user.totalCredit !== user.availableCredit + user.holdCredit) {
+    if (
+      !Number.isSafeInteger(user.totalCredit) ||
+      !Number.isSafeInteger(user.availableCredit) ||
+      !Number.isSafeInteger(user.holdCredit) ||
+      user.totalCredit < 0 ||
+      user.availableCredit < 0 ||
+      user.holdCredit < 0 ||
+      user.totalCredit !== user.availableCredit + user.holdCredit
+    ) {
       throw new Error(`Credit invariant failed for ${user.id}`);
     }
   });
@@ -25,6 +34,14 @@ export function assertWalletInvariant(data: AppStateData) {
 
 function hasHistory(data: AppStateData, ref: string) {
   return data.creditHistory.some((entry) => entry.ref === ref);
+}
+
+function payerIds(tx: Transaction) {
+  return tx.type === 'trade' ? [tx.ownerId, tx.requesterId] : [tx.requesterId];
+}
+
+function validFee(fee: number) {
+  return Number.isSafeInteger(fee) && fee >= 0;
 }
 
 function history(
@@ -50,22 +67,28 @@ function history(
 export function holdFee(data: AppStateData, transactionId: string, userId: string) {
   const tx = data.transactions.find((item) => item.id === transactionId);
   const user = data.users.find((item) => item.id === userId);
-  if (!tx || !user) return;
+  if (!tx || !user || !payerIds(tx).includes(userId)) return false;
   const fee = calculateTransactionFee(tx, userId, data);
   const ref = `${transactionId}:${userId}:HOLD`;
-  if (fee <= 0 || tx.creditHeldBy.includes(userId) || hasHistory(data, ref)) return;
-  if (user.availableCredit < fee) throw new Error('Không đủ Credit khả dụng');
+  const next = tx.status === 'SCHEDULE_CONFIRMED' ? 'CREDIT_HELD' : 'WAITING_HANDOVER';
+  if (
+    !validFee(fee) ||
+    fee === 0 ||
+    tx.creditHeldBy.includes(userId) ||
+    hasHistory(data, ref) ||
+    !canTransition(tx, next) ||
+    user.availableCredit < fee
+  )
+    return false;
   user.availableCredit -= fee;
   user.holdCredit += fee;
   tx.creditHeldBy.push(userId);
-  tx.status = 'CREDIT_HELD';
-  const requiredPayers = tx.type === 'trade' ? [tx.ownerId, tx.requesterId] : [tx.requesterId];
-  if (requiredPayers.every((payerId) => tx.creditHeldBy.includes(payerId))) {
-    tx.status = 'WAITING_HANDOVER';
-  }
+  transitionTransaction(tx, next);
+  if (payerIds(tx).every((payerId) => tx.creditHeldBy.includes(payerId)))
+    transitionTransaction(tx, 'WAITING_HANDOVER');
   data.creditHistory.push(
     history(
-      `ch_${Date.now()}_${userId}`,
+      `ch_${ref}`,
       userId,
       -fee,
       user.availableCredit,
@@ -73,22 +96,36 @@ export function holdFee(data: AppStateData, transactionId: string, userId: strin
       `Giữ phí giao dịch ${transactionId}`,
     ),
   );
+  return true;
 }
 
 export function releaseFee(data: AppStateData, transactionId: string) {
   const tx = data.transactions.find((item) => item.id === transactionId);
-  if (!tx) return;
-  tx.creditHeldBy.forEach((userId) => {
+  if (!tx || !canTransition(tx, 'CANCELLED')) return false;
+  const releases = tx.creditHeldBy.map((userId) => {
     const user = data.users.find((item) => item.id === userId);
-    if (!user) return;
     const fee = calculateTransactionFee(tx, userId, data);
-    const ref = `${transactionId}:${userId}:RELEASE`;
-    if (hasHistory(data, ref)) return;
+    return { userId, user, fee, ref: `${transactionId}:${userId}:RELEASE` };
+  });
+  if (
+    releases.some(
+      ({ userId, user, fee, ref }) =>
+        !user ||
+        !payerIds(tx).includes(userId) ||
+        !validFee(fee) ||
+        user.holdCredit < fee ||
+        hasHistory(data, ref) ||
+        hasHistory(data, `${transactionId}:${userId}:SPEND`),
+    )
+  )
+    return false;
+  releases.forEach(({ userId, user, fee, ref }) => {
+    if (!user) return;
     user.availableCredit += fee;
     user.holdCredit -= fee;
     data.creditHistory.push(
       history(
-        `ch_${Date.now()}_${userId}`,
+        `ch_${ref}`,
         userId,
         fee,
         user.availableCredit,
@@ -98,23 +135,42 @@ export function releaseFee(data: AppStateData, transactionId: string) {
     );
   });
   tx.creditHeldBy = [];
-  tx.status = 'CANCELLED';
+  transitionTransaction(tx, 'CANCELLED');
   tx.cancelledAt = new Date().toISOString();
+  return true;
 }
 
 export function spendHeldFee(data: AppStateData, transactionId: string) {
   const tx = data.transactions.find((item) => item.id === transactionId);
-  if (!tx || tx.status === 'COMPLETED') return;
-  tx.creditHeldBy.forEach((userId) => {
-    const user = data.users.find((item) => item.id === userId);
+  if (!tx || !canTransition(tx, 'COMPLETED') || !tx.senderConfirmed || !tx.receiverConfirmed)
+    return false;
+  const payers = payerIds(tx);
+  if (!payers.every((id) => tx.creditHeldBy.includes(id))) return false;
+  const spends = payers.map((userId) => ({
+    userId,
+    user: data.users.find((item) => item.id === userId),
+    fee: calculateTransactionFee(tx, userId, data),
+    ref: `${transactionId}:${userId}:SPEND`,
+  }));
+  if (
+    spends.some(
+      ({ userId, user, fee, ref }) =>
+        !user ||
+        !validFee(fee) ||
+        user.holdCredit < fee ||
+        user.totalCredit < fee ||
+        !hasHistory(data, `${transactionId}:${userId}:HOLD`) ||
+        hasHistory(data, ref) ||
+        hasHistory(data, `${transactionId}:${userId}:RELEASE`),
+    )
+  )
+    return false;
+  spends.forEach(({ userId, user, fee, ref }) => {
     if (!user) return;
-    const fee = calculateTransactionFee(tx, userId, data);
-    const ref = `${transactionId}:${userId}:SPEND`;
-    if (hasHistory(data, ref)) return;
     user.totalCredit -= fee;
     user.holdCredit -= fee;
     data.creditHistory.push({
-      id: `ch_${Date.now()}_${userId}`,
+      id: `ch_${ref}`,
       userId,
       type: 'TRANSACTION_FEE',
       amount: -fee,
@@ -124,6 +180,8 @@ export function spendHeldFee(data: AppStateData, transactionId: string) {
       createdAt: new Date().toISOString(),
     });
   });
-  tx.status = 'COMPLETED';
+  tx.creditHeldBy = [];
+  transitionTransaction(tx, 'COMPLETED');
   tx.completedAt = new Date().toISOString();
+  return true;
 }

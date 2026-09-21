@@ -2,8 +2,19 @@ import { configureStore, createSlice, type PayloadAction } from '@reduxjs/toolki
 import { assertWalletInvariant, holdFee, releaseFee, spendHeldFee, txFee } from '../utils/credit';
 import { loadPersistedState, resetPersistedState, savePersistedState } from '../utils/storage';
 import type { AppStateData, Handover, Item, Transaction } from '../types/domain';
+import { canTransition, transitionTransaction } from '../utils/transaction';
 
 const initialState: AppStateData = loadPersistedState();
+let idSequence = 0;
+const uniqueId = (prefix: string) => `${prefix}_${Date.now()}_${++idSequence}`;
+const activeActor = (state: AppStateData, actorId: string) =>
+  state.currentUserId === actorId &&
+  state.users.some((user) => user.id === actorId && user.status === 'active');
+const activeAdmin = (state: AppStateData, adminId: string) =>
+  activeActor(state, adminId) &&
+  state.users.some((user) => user.id === adminId && user.role === 'admin');
+const participant = (state: AppStateData, tx: Transaction, actorId: string) =>
+  activeActor(state, actorId) && (tx.ownerId === actorId || tx.requesterId === actorId);
 
 const dataSlice = createSlice({
   name: 'data',
@@ -16,7 +27,7 @@ const dataSlice = createSlice({
           item.password === action.payload.password &&
           item.status !== 'locked',
       );
-      if (user) state.currentUserId = user.id;
+      state.currentUserId = user?.status === 'active' ? user.id : null;
     },
     logout(state) {
       state.currentUserId = null;
@@ -135,7 +146,7 @@ const dataSlice = createSlice({
       action: PayloadAction<{ itemId: string; status: Item['status']; adminId: string }>,
     ) {
       const item = state.items.find((entry) => entry.id === action.payload.itemId);
-      if (!item) return;
+      if (!item || !activeAdmin(state, action.payload.adminId)) return;
       item.status = action.payload.status;
       state.auditLogs.unshift({
         id: `log_${Date.now()}`,
@@ -149,9 +160,15 @@ const dataSlice = createSlice({
     },
     createTransaction(state, action: PayloadAction<{ itemId: string; requesterId: string }>) {
       const item = state.items.find((entry) => entry.id === action.payload.itemId);
-      if (!item || item.ownerId === action.payload.requesterId) return;
+      if (
+        !item ||
+        item.ownerId === action.payload.requesterId ||
+        item.status !== 'approved' ||
+        !activeActor(state, action.payload.requesterId)
+      )
+        return;
       const tx: Transaction = {
-        id: `tx_${Date.now()}`,
+        id: uniqueId('tx'),
         itemId: item.id,
         requesterId: action.payload.requesterId,
         ownerId: item.ownerId,
@@ -165,7 +182,7 @@ const dataSlice = createSlice({
         receiverEvidence: [],
         createdAt: new Date().toISOString(),
       };
-      const convId = `conv_${Date.now()}`;
+      const convId = uniqueId('conv');
       state.transactions.unshift(tx);
       state.conversations.unshift({
         id: convId,
@@ -177,7 +194,7 @@ const dataSlice = createSlice({
         unreadCount: 0,
       });
       state.messages.push({
-        id: `msg_${Date.now()}`,
+        id: uniqueId('msg'),
         convId,
         sender: 'system',
         type: 'system',
@@ -187,15 +204,20 @@ const dataSlice = createSlice({
     },
     proposeHandover(state, action: PayloadAction<Omit<Handover, 'id' | 'status'>>) {
       const tx = state.transactions.find((entry) => entry.id === action.payload.transactionId);
-      if (!tx || (tx.status !== 'NEGOTIATING' && tx.status !== 'SCHEDULE_PROPOSED')) return;
-      const id = `ho_${Date.now()}`;
+      if (
+        !tx ||
+        !participant(state, tx, action.payload.proposedBy) ||
+        !canTransition(tx, 'SCHEDULE_PROPOSED')
+      )
+        return;
+      const id = uniqueId('ho');
       state.handovers.push({ ...action.payload, id, status: 'proposed' });
       tx.handoverId = id;
-      tx.status = 'SCHEDULE_PROPOSED';
+      transitionTransaction(tx, 'SCHEDULE_PROPOSED');
       const conv = state.conversations.find((entry) => entry.transactionId === tx.id);
       if (conv)
         state.messages.push({
-          id: `msg_${Date.now()}`,
+          id: uniqueId('msg'),
           convId: conv.id,
           sender: action.payload.proposedBy,
           type: 'handover_card',
@@ -207,17 +229,25 @@ const dataSlice = createSlice({
     acceptHandover(state, action: PayloadAction<{ handoverId: string; userId: string }>) {
       const ho = state.handovers.find((entry) => entry.id === action.payload.handoverId);
       const tx = state.transactions.find((entry) => entry.id === ho?.transactionId);
-      if (!ho || !tx || tx.status !== 'SCHEDULE_PROPOSED') return;
+      if (
+        !ho ||
+        !tx ||
+        !participant(state, tx, action.payload.userId) ||
+        ho.status !== 'proposed' ||
+        ho.id !== tx.handoverId ||
+        ho.proposedBy === action.payload.userId ||
+        !canTransition(tx, 'SCHEDULE_CONFIRMED')
+      )
+        return;
       ho.status = 'confirmed';
       ho.agreedBy = action.payload.userId;
-      tx.status = 'SCHEDULE_CONFIRMED';
+      transitionTransaction(tx, 'SCHEDULE_CONFIRMED');
     },
     holdTransactionFee(state, action: PayloadAction<{ transactionId: string; userId: string }>) {
       const transaction = state.transactions.find(
         (entry) => entry.id === action.payload.transactionId,
       );
-      if (!transaction || !['SCHEDULE_CONFIRMED', 'CREDIT_HELD'].includes(transaction.status))
-        return;
+      if (!transaction || !participant(state, transaction, action.payload.userId)) return;
       holdFee(state, action.payload.transactionId, action.payload.userId);
     },
     confirmTransactionSide(
@@ -225,50 +255,90 @@ const dataSlice = createSlice({
       action: PayloadAction<{ transactionId: string; userId: string; evidence?: string[] }>,
     ) {
       const tx = state.transactions.find((entry) => entry.id === action.payload.transactionId);
-      if (!tx || tx.status === 'COMPLETED') return;
+      if (
+        !tx ||
+        !participant(state, tx, action.payload.userId) ||
+        !['WAITING_HANDOVER', 'SENDER_CONFIRMED', 'RECEIVER_CONFIRMED'].includes(tx.status)
+      )
+        return;
       const requiredPayers = tx.type === 'trade' ? [tx.ownerId, tx.requesterId] : [tx.requesterId];
       if (!requiredPayers.every((payerId) => tx.creditHeldBy.includes(payerId))) return;
       if (action.payload.userId === tx.ownerId) {
+        if (tx.senderConfirmed) return;
+        if (!canTransition(tx, tx.receiverConfirmed ? 'COMPLETED' : 'SENDER_CONFIRMED')) return;
         tx.senderConfirmed = true;
         tx.senderEvidence = action.payload.evidence ?? [];
-      }
-      if (action.payload.userId === tx.requesterId) {
+        if (tx.receiverConfirmed) {
+          if (!spendHeldFee(state, tx.id)) {
+            tx.senderConfirmed = false;
+            tx.senderEvidence = [];
+          }
+        } else transitionTransaction(tx, 'SENDER_CONFIRMED');
+      } else {
+        if (tx.receiverConfirmed) return;
+        if (!canTransition(tx, tx.senderConfirmed ? 'COMPLETED' : 'RECEIVER_CONFIRMED')) return;
         tx.receiverConfirmed = true;
         tx.receiverEvidence = action.payload.evidence ?? [];
+        if (tx.senderConfirmed) {
+          if (!spendHeldFee(state, tx.id)) {
+            tx.receiverConfirmed = false;
+            tx.receiverEvidence = [];
+          }
+        } else transitionTransaction(tx, 'RECEIVER_CONFIRMED');
       }
-      if (tx.senderConfirmed && tx.receiverConfirmed) spendHeldFee(state, tx.id);
-      else
-        tx.status =
-          action.payload.userId === tx.ownerId ? 'SENDER_CONFIRMED' : 'RECEIVER_CONFIRMED';
     },
-    cancelTransaction(state, action: PayloadAction<{ transactionId: string }>) {
+    cancelTransaction(state, action: PayloadAction<{ transactionId: string; actorId: string }>) {
+      const tx = state.transactions.find((entry) => entry.id === action.payload.transactionId);
+      if (!tx || !participant(state, tx, action.payload.actorId)) return;
       releaseFee(state, action.payload.transactionId);
     },
     sendMessage(state, action: PayloadAction<{ convId: string; sender: string; text: string }>) {
+      const conv = state.conversations.find((entry) => entry.id === action.payload.convId);
+      const tx = state.transactions.find((entry) => entry.id === conv?.transactionId);
+      if (
+        !conv ||
+        !tx ||
+        !participant(state, tx, action.payload.sender) ||
+        !conv.participantIds.includes(action.payload.sender) ||
+        !action.payload.text.trim()
+      )
+        return;
       state.messages.push({
-        id: `msg_${Date.now()}`,
+        id: uniqueId('msg'),
         convId: action.payload.convId,
         sender: action.payload.sender,
         type: 'chat',
         text: action.payload.text,
         time: 'Bây giờ',
       });
-      const conv = state.conversations.find((entry) => entry.id === action.payload.convId);
-      if (conv) {
-        conv.lastMessage = action.payload.text;
-        conv.lastMessageAt = new Date().toISOString();
-      }
+      conv.lastMessage = action.payload.text;
+      conv.lastMessageAt = new Date().toISOString();
     },
     topupCredit(
       state,
       action: PayloadAction<{ userId: string; vnd: number; id?: string; code?: string }>,
     ) {
       const user = state.users.find((entry) => entry.id === action.payload.userId);
-      if (!user) return;
+      if (!user || !activeActor(state, action.payload.userId)) return;
+      if (
+        !Number.isSafeInteger(action.payload.vnd) ||
+        action.payload.vnd <= 0 ||
+        action.payload.vnd % 1000 !== 0
+      )
+        return;
       const amount = action.payload.vnd / 1000;
+      const id = action.payload.id ?? uniqueId('top');
+      const code = action.payload.code ?? uniqueId('SLTOPUP');
+      if (
+        !id.trim() ||
+        !code.trim() ||
+        state.topups.some((topup) => topup.id === id || topup.code === code) ||
+        state.creditHistory.some((entry) => entry.ref === id)
+      )
+        return;
       state.topups.unshift({
-        id: action.payload.id ?? `top_${Date.now()}`,
-        code: action.payload.code ?? `SLTOPUP-${String(Date.now()).slice(-6)}`,
+        id,
+        code,
         userId: user.id,
         amount,
         vnd: action.payload.vnd,
@@ -280,13 +350,26 @@ const dataSlice = createSlice({
     confirmTopup(state, action: PayloadAction<{ topupId: string; adminId: string }>) {
       const topup = state.topups.find((entry) => entry.id === action.payload.topupId);
       const user = state.users.find((entry) => entry.id === topup?.userId);
-      if (!topup || !user || !['pending', 'confirming'].includes(topup.status)) return;
+      if (
+        !topup ||
+        !user ||
+        !activeAdmin(state, action.payload.adminId) ||
+        topup.status !== 'pending' ||
+        !Number.isSafeInteger(topup.vnd) ||
+        topup.vnd <= 0 ||
+        topup.vnd % 1000 !== 0 ||
+        topup.amount !== topup.vnd / 1000 ||
+        !Number.isSafeInteger(user.totalCredit + topup.amount) ||
+        !Number.isSafeInteger(user.availableCredit + topup.amount) ||
+        state.creditHistory.some((entry) => entry.ref === topup.id)
+      )
+        return;
       topup.status = 'completed';
       topup.confirmedAt = new Date().toISOString();
       user.totalCredit += topup.amount;
       user.availableCredit += topup.amount;
       state.creditHistory.unshift({
-        id: `ch_${Date.now()}`,
+        id: uniqueId('ch'),
         userId: user.id,
         type: 'TOPUP',
         amount: topup.amount,
@@ -296,7 +379,7 @@ const dataSlice = createSlice({
         createdAt: new Date().toISOString(),
       });
       state.auditLogs.unshift({
-        id: `log_${Date.now()}`,
+        id: uniqueId('log'),
         adminId: action.payload.adminId,
         action: 'confirm_topup',
         targetType: 'user',
@@ -307,23 +390,42 @@ const dataSlice = createSlice({
     },
     adminAdjustCredit(
       state,
-      action: PayloadAction<{ adminId: string; userId: string; amount: number; note: string }>,
+      action: PayloadAction<{
+        adminId: string;
+        userId: string;
+        amount: number;
+        note: string;
+        ref: string;
+      }>,
     ) {
       const user = state.users.find((entry) => entry.id === action.payload.userId);
-      if (!user) return;
+      if (
+        !user ||
+        !activeAdmin(state, action.payload.adminId) ||
+        !Number.isSafeInteger(action.payload.amount) ||
+        action.payload.amount === 0 ||
+        !Number.isSafeInteger(user.availableCredit + action.payload.amount) ||
+        user.availableCredit + action.payload.amount < 0 ||
+        !Number.isSafeInteger(user.totalCredit + action.payload.amount) ||
+        !action.payload.ref.trim() ||
+        state.creditHistory.some((entry) => entry.ref === action.payload.ref) ||
+        state.topups.some((topup) => topup.id === action.payload.ref)
+      )
+        return;
       user.totalCredit += action.payload.amount;
       user.availableCredit += action.payload.amount;
       state.creditHistory.unshift({
-        id: `ch_${Date.now()}`,
+        id: uniqueId('ch'),
         userId: user.id,
         type: 'ADMIN_ADJUSTMENT',
         amount: action.payload.amount,
         balance: user.availableCredit,
+        ref: action.payload.ref,
         note: action.payload.note,
         createdAt: new Date().toISOString(),
       });
       state.auditLogs.unshift({
-        id: `log_${Date.now()}`,
+        id: uniqueId('log'),
         adminId: action.payload.adminId,
         action: 'adjust_credit',
         targetType: 'user',
@@ -333,6 +435,12 @@ const dataSlice = createSlice({
       });
     },
     updateFeeSetting(state, action: PayloadAction<{ adminId: string; fee: number }>) {
+      if (
+        !activeAdmin(state, action.payload.adminId) ||
+        !Number.isSafeInteger(action.payload.fee) ||
+        action.payload.fee <= 0
+      )
+        return;
       const setting = state.settings.find((entry) => entry.key === 'tx_fee_credit');
       if (setting) {
         setting.value = action.payload.fee;
@@ -351,7 +459,7 @@ const dataSlice = createSlice({
     },
     lockUser(state, action: PayloadAction<{ adminId: string; userId: string; locked: boolean }>) {
       const user = state.users.find((entry) => entry.id === action.payload.userId);
-      if (!user || user.role === 'admin') return;
+      if (!user || user.role === 'admin' || !activeAdmin(state, action.payload.adminId)) return;
       user.status = action.payload.locked ? 'locked' : 'active';
       state.auditLogs.unshift({
         id: `log_${Date.now()}`,
@@ -363,13 +471,21 @@ const dataSlice = createSlice({
         createdAt: new Date().toISOString(),
       });
     },
-    resetDemoData() {
+    resetDemoData(state) {
+      if (
+        !state.users.some(
+          (user) =>
+            user.id === state.currentUserId && user.role === 'admin' && user.status === 'active',
+        )
+      )
+        return;
       return resetPersistedState();
     },
   },
 });
 
 export const actions = dataSlice.actions;
+export const dataReducer = dataSlice.reducer;
 export const store = configureStore({ reducer: { data: dataSlice.reducer } });
 store.subscribe(() => {
   assertWalletInvariant(store.getState().data);
