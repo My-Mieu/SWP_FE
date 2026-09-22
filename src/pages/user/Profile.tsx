@@ -24,7 +24,7 @@ export function Profile() {
   const [email, setEmail] = useState(user.email);
   const [phone, setPhone] = useState(user.phone);
   const [district, setDistrict] = useState(user.district);
-  const [amount, setAmount] = useState(50000);
+  const [amount, setAmount] = useState(5000);
   const [showQr, setShowQr] = useState(false);
   const history = data.creditHistory.filter((h) => h.userId === user.id);
   const topups = data.topups.filter((t) => t.userId === user.id);
@@ -154,7 +154,7 @@ export function Profile() {
                     </div>
                   </div>
                   <div className="mt-4 grid grid-cols-3 gap-2 sm:grid-cols-6">
-                    {[10000, 20000, 50000, 100000, 200000].map((v) => (
+                    {[1000, 2000, 5000, 10000, 20000].map((v) => (
                       <button
                         key={v}
                         onClick={() => setAmount(v)}

@@ -21,9 +21,11 @@ import type {
   Item,
   KeywordAction,
   RankRule,
+  ReputationPointRule,
   Transaction,
 } from '../types/domain';
 import { canTransition, transitionTransaction } from '../utils/transaction';
+import { applyReputationPointEvent, rankFor } from '../utils/reputation';
 
 const initialState: AppStateData = loadPersistedState();
 let idSequence = 0;
@@ -36,11 +38,6 @@ const activeAdmin = (state: AppStateData, adminId: string) =>
   state.users.some((user) => user.id === adminId && user.role === 'admin');
 const participant = (state: AppStateData, tx: Transaction, actorId: string) =>
   activeActor(state, actorId) && (tx.ownerId === actorId || tx.requesterId === actorId);
-const rankFor = (points: number, ranks: RankRule[]) =>
-  [...ranks]
-    .sort((a, b) => b.minPoints - a.minPoints)
-    .find((rank) => points >= rank.minPoints && (rank.maxPoints === undefined || points <= rank.maxPoints))
-    ?.name ?? 'Thành viên mới';
 const recalculateUserRanks = (state: AppStateData) => {
   state.users.forEach((user) => {
     if (user.role !== 'admin') user.rank = rankFor(user.rewardPoints, state.ranks);
@@ -114,8 +111,8 @@ const dataSlice = createSlice({
           .slice(-2)
           .join('')
           .toUpperCase(),
-        totalCredit: 20000,
-        availableCredit: 20000,
+        totalCredit: 2000,
+        availableCredit: 2000,
         holdCredit: 0,
         rewardPoints: 0,
         reputationStars: 5,
@@ -156,6 +153,7 @@ const dataSlice = createSlice({
       if (!item) return;
       Object.assign(item, action.payload.changes);
       item.status = 'pending';
+      item.rejectionReason = undefined;
     },
     removeItem(state, action: PayloadAction<{ itemId: string; ownerId: string }>) {
       const item = state.items.find(
@@ -200,11 +198,19 @@ const dataSlice = createSlice({
     },
     updateItemStatus(
       state,
-      action: PayloadAction<{ itemId: string; status: Item['status']; adminId: string }>,
+      action: PayloadAction<{
+        itemId: string;
+        status: Item['status'];
+        adminId: string;
+        rejectionReason?: string;
+      }>,
     ) {
       const item = state.items.find((entry) => entry.id === action.payload.itemId);
       if (!item || !activeAdmin(state, action.payload.adminId)) return;
+      const rejectionReason = action.payload.rejectionReason?.trim();
+      if (action.payload.status === 'rejected' && !rejectionReason) return;
       item.status = action.payload.status;
+      item.rejectionReason = action.payload.status === 'rejected' ? rejectionReason : undefined;
       state.auditLogs.unshift({
         id: `log_${Date.now()}`,
         adminId: action.payload.adminId,
@@ -214,6 +220,17 @@ const dataSlice = createSlice({
         detail: `Cập nhật trạng thái bài đăng: ${item.title}`,
         createdAt: new Date().toISOString(),
       });
+      if (
+        action.payload.status === 'rejected' &&
+        item.rejectionReason &&
+        /vi phạm|bị cấm|cam|vi pham/i.test(item.rejectionReason)
+      ) {
+        applyReputationPointEvent(state, {
+          userId: item.ownerId,
+          key: 'content_violation',
+          ref: `${item.id}:content_violation`,
+        });
+      }
     },
     createTransaction(
       state,
@@ -350,6 +367,16 @@ const dataSlice = createSlice({
       tx.ownerScheduleConfirmed = true;
       tx.requesterScheduleConfirmed = true;
       if (holdAllTransactionFees(state, tx.id)) {
+        applyReputationPointEvent(state, {
+          userId: tx.ownerId,
+          key: 'handover_confirmed_on_time',
+          ref: `${tx.id}:${tx.ownerId}:handover_confirmed_on_time`,
+        });
+        applyReputationPointEvent(state, {
+          userId: tx.requesterId,
+          key: 'handover_confirmed_on_time',
+          ref: `${tx.id}:${tx.requesterId}:handover_confirmed_on_time`,
+        });
         addSystemMessage(state, tx.id, 'Lich da duoc xac nhan va Credit da duoc giu. Thong tin lien he da mo khoa.');
       } else {
         ho.status = 'proposed';
@@ -537,7 +564,14 @@ const dataSlice = createSlice({
       complaint.status = action.payload.status;
       complaint.adminNote = action.payload.adminNote ?? complaint.adminNote;
       complaint.resolution = action.payload.resolution ?? complaint.resolution;
-      if (action.payload.status === 'resolved') complaint.resolvedAt = new Date().toISOString();
+      if (action.payload.status === 'resolved') {
+        complaint.resolvedAt = new Date().toISOString();
+        applyReputationPointEvent(state, {
+          userId: complaint.reportedUserId,
+          key: 'valid_complaint',
+          ref: `${complaint.id}:valid_complaint`,
+        });
+      }
     },
     updateRankRule(
       state,
@@ -547,6 +581,8 @@ const dataSlice = createSlice({
         name: string;
         minPoints: number;
         maxPoints?: number;
+        benefits?: string;
+        status?: RankRule['status'];
       }>,
     ) {
       if (!activeAdmin(state, action.payload.adminId)) return;
@@ -559,6 +595,8 @@ const dataSlice = createSlice({
               name: action.payload.name.trim(),
               minPoints: action.payload.minPoints,
               maxPoints: action.payload.maxPoints,
+              benefits: action.payload.benefits?.trim(),
+              status: action.payload.status ?? 'active',
             }
           : entry,
       );
@@ -575,13 +613,121 @@ const dataSlice = createSlice({
         name: action.payload.name.trim(),
         minPoints: action.payload.minPoints,
         maxPoints: action.payload.maxPoints,
+        benefits: action.payload.benefits?.trim(),
+        status: action.payload.status ?? 'active',
       });
       recalculateUserRanks(state);
+    },
+    addRankRule(
+      state,
+      action: PayloadAction<{
+        adminId: string;
+        name: string;
+        minPoints: number;
+        maxPoints?: number;
+        benefits?: string;
+        status?: RankRule['status'];
+      }>,
+    ) {
+      if (!activeAdmin(state, action.payload.adminId)) return;
+      const name = action.payload.name.trim();
+      if (!name || action.payload.minPoints < 0) return;
+      const candidate: RankRule = {
+        id: uniqueId('rank'),
+        name,
+        minPoints: action.payload.minPoints,
+        maxPoints: action.payload.maxPoints,
+        benefits: action.payload.benefits?.trim(),
+        status: action.payload.status ?? 'active',
+      };
+      const nextRanks = [...state.ranks, candidate];
+      const valid = nextRanks.every((entry, index) =>
+        nextRanks.every((other, otherIndex) => {
+          if (index === otherIndex) return true;
+          const aMax = entry.maxPoints ?? Number.MAX_SAFE_INTEGER;
+          const bMax = other.maxPoints ?? Number.MAX_SAFE_INTEGER;
+          return aMax < other.minPoints || bMax < entry.minPoints;
+        }),
+      );
+      if (!valid) return;
+      state.ranks.push(candidate);
+      recalculateUserRanks(state);
+    },
+    addPointRule(
+      state,
+      action: PayloadAction<{
+        adminId: string;
+        behavior: string;
+        type: ReputationPointRule['type'];
+        points: number;
+        status: ReputationPointRule['status'];
+        description: string;
+      }>,
+    ) {
+      if (!activeAdmin(state, action.payload.adminId)) return;
+      const behavior = action.payload.behavior.trim();
+      if (!behavior || action.payload.points < 0) return;
+      const id = uniqueId('rule');
+      state.pointRules.push({
+        id,
+        key: `custom_${Date.now()}` as ReputationPointRule['key'],
+        behavior,
+        type: action.payload.type,
+        points: action.payload.points,
+        status: action.payload.status,
+        description: action.payload.description.trim(),
+      });
+      state.auditLogs.unshift({
+        id: uniqueId('log'),
+        adminId: action.payload.adminId,
+        action: 'add_point_rule',
+        targetType: 'point_rule',
+        targetId: id,
+        detail: `Thêm quy tắc điểm: ${behavior}`,
+        createdAt: new Date().toISOString(),
+      });
+    },
+    updatePointRule(
+      state,
+      action: PayloadAction<{
+        adminId: string;
+        id: string;
+        behavior: string;
+        type: ReputationPointRule['type'];
+        points: number;
+        status: ReputationPointRule['status'];
+        description: string;
+      }>,
+    ) {
+      if (!activeAdmin(state, action.payload.adminId)) return;
+      const rule = state.pointRules.find((entry) => entry.id === action.payload.id);
+      const behavior = action.payload.behavior.trim();
+      if (!rule || !behavior || action.payload.points < 0) return;
+      rule.behavior = behavior;
+      rule.type = action.payload.type;
+      rule.points = action.payload.points;
+      rule.status = action.payload.status;
+      rule.description = action.payload.description.trim();
+      state.auditLogs.unshift({
+        id: uniqueId('log'),
+        adminId: action.payload.adminId,
+        action: 'update_point_rule',
+        targetType: 'point_rule',
+        targetId: rule.id,
+        detail: `Cập nhật quy tắc điểm: ${behavior}`,
+        createdAt: new Date().toISOString(),
+      });
     },
     cancelTransaction(state, action: PayloadAction<{ transactionId: string; actorId: string }>) {
       const tx = state.transactions.find((entry) => entry.id === action.payload.transactionId);
       if (!tx || !participant(state, tx, action.payload.actorId)) return;
-      releaseFee(state, action.payload.transactionId);
+      if (releaseFee(state, action.payload.transactionId)) {
+        applyReputationPointEvent(state, {
+          userId: action.payload.actorId,
+          key: 'unreasoned_cancel',
+          ref: `${tx.id}:${action.payload.actorId}:unreasoned_cancel`,
+        });
+      }
     },
     sendMessage(state, action: PayloadAction<{ convId: string; sender: string; text: string }>) {
       const conv = state.conversations.find((entry) => entry.id === action.payload.convId);

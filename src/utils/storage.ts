@@ -5,20 +5,14 @@ import {
   seedDistricts,
   seedItems,
   seedKeywords,
+  seedPointHistory,
+  seedPointRules,
   seedRanks,
 } from '../mocks/database';
 import type { AppStateData } from '../types/domain';
+import { rankFor } from './reputation';
 
 const KEY = 'shareloop:v1:state';
-
-function rankFor(points: number, ranks = seedRanks) {
-  return (
-    [...ranks]
-      .sort((a, b) => b.minPoints - a.minPoints)
-      .find((rank) => points >= rank.minPoints && (rank.maxPoints === undefined || points <= rank.maxPoints))
-      ?.name ?? 'Thành viên mới'
-  );
-}
 
 function normalizeCreditHistory(parsed: AppStateData) {
   const existing = (parsed.creditHistory ?? []).map((entry) => {
@@ -56,6 +50,35 @@ function normalizeCreditHistory(parsed: AppStateData) {
   return [...existing, ...seedCreditHistory.filter((entry) => !existingIds.has(entry.id))];
 }
 
+function scaleCreditsDown(parsed: AppStateData) {
+  parsed.systemRevenue = Math.round((parsed.systemRevenue ?? 0) / 10);
+  parsed.users = (parsed.users ?? []).map((user) => ({
+    ...user,
+    totalCredit: Math.round(user.totalCredit / 10),
+    availableCredit: Math.round(user.availableCredit / 10),
+    holdCredit: Math.round(user.holdCredit / 10),
+  }));
+  parsed.creditHistory = (parsed.creditHistory ?? []).map((entry) => ({
+    ...entry,
+    amount: Math.round(entry.amount / 10),
+    balance: Math.round(entry.balance / 10),
+  }));
+  parsed.topups = (parsed.topups ?? []).map((topup) => ({
+    ...topup,
+    amount: Math.round(topup.amount / 10),
+    vnd: Math.round(topup.vnd / 10),
+  }));
+  parsed.transactions = (parsed.transactions ?? []).map((tx) => ({
+    ...tx,
+    feeCredit: tx.feeCredit === undefined ? undefined : Math.round(tx.feeCredit / 10),
+  }));
+  parsed.settings = (parsed.settings ?? []).map((setting) =>
+    setting.key === 'tx_fee_credit' && typeof setting.value === 'number'
+      ? { ...setting, value: Math.round(setting.value / 10) }
+      : setting,
+  );
+}
+
 export function loadPersistedState(): AppStateData {
   if (typeof localStorage === 'undefined') return initialData;
   const raw = localStorage.getItem(KEY);
@@ -65,6 +88,20 @@ export function loadPersistedState(): AppStateData {
     if (parsed.settings?.some((setting) => setting.key === 'tx_fee_credit' && Number(setting.value) <= 5)) {
       localStorage.setItem(KEY, JSON.stringify(initialData));
       return initialData;
+    }
+    const scaleVersion = Number(parsed.settings?.find((setting) => setting.key === 'credit_scale_version')?.value ?? 1);
+    if (scaleVersion < 2) {
+      scaleCreditsDown(parsed);
+      parsed.settings = [
+        ...(parsed.settings ?? []).filter((setting) => setting.key !== 'credit_scale_version'),
+        {
+          key: 'credit_scale_version',
+          value: 2,
+          label: 'Phiên bản quy đổi Credit',
+          updatedAt: new Date().toISOString(),
+          updatedBy: 'system',
+        },
+      ];
     }
     parsed.topups = (parsed.topups ?? []).map((topup) => ({
       ...topup,
@@ -98,6 +135,8 @@ export function loadPersistedState(): AppStateData {
     parsed.systemRevenue = parsed.systemRevenue ?? 0;
     parsed.aiUsage = parsed.aiUsage ?? [];
     parsed.ranks = parsed.ranks ?? seedRanks;
+    parsed.pointRules = parsed.pointRules ?? seedPointRules;
+    parsed.pointHistory = parsed.pointHistory ?? seedPointHistory;
     parsed.creditHistory = normalizeCreditHistory(parsed);
     parsed.users = (parsed.users ?? []).map((user) =>
       user.role === 'admin' ? user : { ...user, rank: rankFor(user.rewardPoints, parsed.ranks) },

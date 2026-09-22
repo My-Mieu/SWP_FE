@@ -40,7 +40,6 @@ const sections = [
     label: 'Cấu hình',
     items: [
       ['settings', 'Phí & hạn mức', '/admin/settings/fees'],
-      ['star', 'Mốc hạng', '/admin/settings/ranks'],
     ],
   },
   { label: 'Hệ thống', items: [['history', 'Audit Log', '/admin/audit-logs']] },

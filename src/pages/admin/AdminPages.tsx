@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../../app/hooks';
 import { actions, selectCurrentUser, selectData } from '../../app/store';
 import {
@@ -18,7 +18,7 @@ import {
 } from '../../components/ui';
 import { CATEGORIES } from '../../constants/domain';
 import { formatVnd } from '../../utils/formatting';
-import type { ComplaintStatus, ForbiddenKeyword, KeywordAction, RankRule, SupportedDistrict } from '../../types/domain';
+import type { AppStateData, ComplaintStatus, ForbiddenKeyword, Item, KeywordAction, RankRule, ReputationPointRule, SupportedDistrict, Transaction } from '../../types/domain';
 
 function Panel({
   title,
@@ -135,6 +135,8 @@ export function AdminModeration() {
   const admin = useAppSelector(selectCurrentUser)!;
   const dispatch = useAppDispatch();
   const [query, setQuery] = useState('');
+  const [rejecting, setRejecting] = useState<Item | null>(null);
+  const [toast, setToast] = useState('');
   const rows = data.items
     .filter((i) => i.status === 'pending')
     .filter((i) => i.title.toLowerCase().includes(query.toLowerCase()));
@@ -183,15 +185,7 @@ export function AdminModeration() {
                 <Button
                   size="sm"
                   variant="danger"
-                  onClick={() =>
-                    dispatch(
-                      actions.updateItemStatus({
-                        itemId: item.id,
-                        status: 'rejected',
-                        adminId: admin.id,
-                      }),
-                    )
-                  }
+                  onClick={() => setRejecting(item)}
                 >
                   Từ chối
                 </Button>
@@ -214,7 +208,100 @@ export function AdminModeration() {
           );
         })}
       </div>
+      {toast ? <Toast message={toast} onClose={() => setToast('')} /> : null}
+      {rejecting ? (
+        <RejectPostModal
+          item={rejecting}
+          onClose={() => setRejecting(null)}
+          onConfirm={(reason) => {
+            dispatch(
+              actions.updateItemStatus({
+                itemId: rejecting.id,
+                status: 'rejected',
+                adminId: admin.id,
+                rejectionReason: reason,
+              }),
+            );
+            setRejecting(null);
+            setToast('Đã từ chối bài đăng.');
+          }}
+        />
+      ) : null}
     </Panel>
+  );
+}
+
+const rejectionOptions = [
+  'Danh mục không phù hợp',
+  'Nội dung không rõ ràng',
+  'Hình ảnh không phù hợp',
+  'Sản phẩm thuộc danh mục bị cấm',
+  'Nội dung có dấu hiệu vi phạm',
+  'Khác',
+];
+
+function RejectPostModal({
+  item,
+  onClose,
+  onConfirm,
+}: {
+  item: Item;
+  onClose: () => void;
+  // eslint-disable-next-line no-unused-vars
+  onConfirm: (..._args: [string]) => void;
+}) {
+  const [selectedReason, setSelectedReason] = useState('');
+  const [detail, setDetail] = useState('');
+  const [error, setError] = useState('');
+  const reason = [selectedReason, detail.trim()].filter(Boolean).join(' - ');
+  return (
+    <Modal title="Từ chối bài đăng" onClose={onClose}>
+      <p className="text-sm leading-6 text-text-muted">
+        Vui lòng cho biết lý do bài đăng không được duyệt.
+      </p>
+      <div className="mt-4 grid gap-2">
+        {rejectionOptions.map((option) => (
+          <label key={option} className="flex cursor-pointer items-center gap-2 rounded-md border border-border px-3 py-2 text-sm">
+            <input
+              type="radio"
+              name={`reject-${item.id}`}
+              checked={selectedReason === option}
+              onChange={() => {
+                setSelectedReason(option);
+                setError('');
+              }}
+            />
+            <span>{option}</span>
+          </label>
+        ))}
+      </div>
+      <TextArea
+        className="mt-4"
+        label="Lý do chi tiết"
+        placeholder="Nhập lý do từ chối để người đăng biết cần chỉnh sửa nội dung nào..."
+        value={detail}
+        error={error}
+        onChange={(event) => {
+          setDetail(event.target.value);
+          setError('');
+        }}
+      />
+      <div className="mt-6 flex justify-end gap-2">
+        <Button variant="ghost" onClick={onClose}>Hủy</Button>
+        <Button
+          variant="danger"
+          onClick={() => {
+            if (!reason.trim()) {
+              setError('Vui lòng nhập lý do từ chối.');
+              return;
+            }
+            onConfirm(reason);
+          }}
+        >
+          Xác nhận từ chối
+        </Button>
+      </div>
+    </Modal>
   );
 }
 
@@ -325,6 +412,7 @@ export function AdminUserDetail() {
     );
   const txs = data.transactions.filter((t) => t.ownerId === u.id || t.requesterId === u.id);
   const creditHistory = data.creditHistory.filter((entry) => entry.userId === u.id);
+  const pointHistory = data.pointHistory.filter((entry) => entry.userId === u.id);
   return (
     <Panel
       title={u.name}
@@ -361,6 +449,38 @@ export function AdminUserDetail() {
                     <td>{entry.balance}</td>
                   </tr>
                 ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <section>
+          <h2 className="mb-3 section-title">Lịch sử điểm</h2>
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Thời gian</th>
+                  <th>Sự kiện</th>
+                  <th>Thay đổi</th>
+                  <th>Điểm sau thay đổi</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pointHistory.map((entry) => (
+                  <tr key={entry.id}>
+                    <td>{new Date(entry.createdAt).toLocaleString('vi-VN')}</td>
+                    <td>{entry.event}</td>
+                    <td className={entry.change < 0 ? 'text-error' : 'text-success'}>
+                      {entry.change > 0 ? '+' : ''}{entry.change}
+                    </td>
+                    <td>{entry.pointsAfter}</td>
+                  </tr>
+                ))}
+                {!pointHistory.length ? (
+                  <tr>
+                    <td colSpan={4} className="text-text-muted">Chưa có lịch sử điểm.</td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>
@@ -697,7 +817,7 @@ export function AdminSettings() {
   const admin = useAppSelector(selectCurrentUser)!;
   const dispatch = useAppDispatch();
   const [fee, setFee] = useState(
-    Number(data.settings.find((s) => s.key === 'tx_fee_credit')?.value ?? 2000),
+    Number(data.settings.find((s) => s.key === 'tx_fee_credit')?.value ?? 200),
   );
   return (
     <Panel title="Phí & hạn mức" description="Cấu hình áp dụng cho các giao dịch mới.">
@@ -708,18 +828,18 @@ export function AdminSettings() {
             label="Phí giao dịch (Credit)"
             value={fee}
             onChange={(e) => setFee(Number(e.target.value))}
-            hint="Swap: 2.000 mỗi bên. Give: người nhận 4.000."
+            hint="Swap: 200 mỗi bên. Give: người nhận 400."
           />
           <Field
             type="number"
             label="Hạn mức top-up/ngày"
-            value={200000}
+            value={20000}
             readOnly
             hint="Giá trị demo bằng VND."
           />
         </div>
         <div className="mt-5 rounded-md bg-primary-faint p-4 text-sm text-text-secondary">
-          1 Credit = 1 VND. Swap thu 2.000 Credit mỗi bên; Give thu 4.000 Credit từ người nhận.
+          1 Credit = 1 VND. Swap thu 200 Credit mỗi bên; Give thu 400 Credit từ người nhận.
         </div>
         <Button
           className="mt-5"
@@ -1103,41 +1223,31 @@ function AdminRanks() {
   const admin = useAppSelector(selectCurrentUser)!;
   const dispatch = useAppDispatch();
   const [editing, setEditing] = useState<RankRule | null>(null);
+  const [toast, setToast] = useState('');
   const rows = [...data.ranks].sort((a, b) => a.minPoints - b.minPoints);
   return (
-    <Panel title="Mốc hạng" description="Cấu hình khoảng điểm dùng để xác định hạng thành viên.">
-      <div className="table-wrap">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Tên hạng</th>
-              <th>Khoảng điểm</th>
-              <th>Mốc tối thiểu</th>
-              <th>Thao tác</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((rank) => (
-              <tr key={rank.id}>
-                <td className="font-semibold">{rank.name}</td>
-                <td>{rank.minPoints}–{rank.maxPoints ?? '+'}</td>
-                <td>{rank.minPoints}</td>
-                <td><Button size="sm" variant="ghost" onClick={() => setEditing(rank)}>Sửa</Button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+    <Panel
+      title="Mốc hạng"
+      description="Cấu hình khoảng điểm dùng để xác định hạng thành viên."
+      action={<Button icon="add" onClick={() => setEditing(emptyRank())}>Thêm mốc hạng</Button>}
+    >
+      <RankTable ranks={rows} onEdit={setEditing} />
       {editing ? (
         <RankModal
           rank={editing}
           onClose={() => setEditing(null)}
-          onSave={(name, minPoints, maxPoints) => {
-            dispatch(actions.updateRankRule({ adminId: admin.id, id: editing.id, name, minPoints, maxPoints }));
+          onSave={(name, minPoints, maxPoints, benefits, status) => {
+            if (editing.id) {
+              dispatch(actions.updateRankRule({ adminId: admin.id, id: editing.id, name, minPoints, maxPoints, benefits, status }));
+            } else {
+              dispatch(actions.addRankRule({ adminId: admin.id, name, minPoints, maxPoints, benefits, status }));
+            }
             setEditing(null);
+            setToast('Đã cập nhật mốc hạng thành công.');
           }}
         />
       ) : null}
+      {toast ? <Toast message={toast} onClose={() => setToast('')} /> : null}
     </Panel>
   );
 }
@@ -1150,53 +1260,244 @@ function RankModal({
   rank: RankRule;
   onClose: () => void;
   // eslint-disable-next-line no-unused-vars
-  onSave: (..._args: [string, number, number?]) => void;
+  onSave: (..._args: [string, number, number | undefined, string, RankRule['status']]) => void;
 }) {
   const [name, setName] = useState(rank.name);
   const [minPoints, setMinPoints] = useState(rank.minPoints);
   const [maxPoints, setMaxPoints] = useState(rank.maxPoints ?? '');
+  const [benefits, setBenefits] = useState(rank.benefits ?? '');
+  const [status, setStatus] = useState<RankRule['status']>(rank.status ?? 'active');
   return (
-    <Modal title="Sửa mốc hạng" onClose={onClose}>
+    <Modal title={rank.id ? 'Chỉnh sửa mốc hạng' : 'Thêm mốc hạng'} onClose={onClose}>
       <Field label="Tên hạng" value={name} onChange={(event) => setName(event.target.value)} />
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
         <Field label="Điểm tối thiểu" type="number" value={minPoints} onChange={(event) => setMinPoints(Number(event.target.value))} />
         <Field label="Điểm tối đa" type="number" value={maxPoints} onChange={(event) => setMaxPoints(event.target.value === '' ? '' : Number(event.target.value))} />
       </div>
+      <TextArea className="mt-4" label="Quyền lợi" value={benefits} onChange={(event) => setBenefits(event.target.value)} />
+      <Select className="mt-4" label="Trạng thái" value={status} onChange={(event) => setStatus(event.target.value as RankRule['status'])}>
+        <option value="active">Đang dùng</option>
+        <option value="inactive">Tạm ẩn</option>
+      </Select>
       <div className="mt-6 flex justify-end gap-2">
         <Button variant="ghost" onClick={onClose}>Hủy</Button>
-        <Button onClick={() => onSave(name, minPoints, maxPoints === '' ? undefined : Number(maxPoints))}>Lưu thay đổi</Button>
+        <Button onClick={() => onSave(name, minPoints, maxPoints === '' ? undefined : Number(maxPoints), benefits, status)}>Lưu thay đổi</Button>
       </div>
     </Modal>
   );
 }
 
+function emptyRank(): RankRule {
+  return { id: '', name: '', minPoints: 0, benefits: '', status: 'active' };
+}
+
+function RankTable({
+  ranks,
+  onEdit,
+}: {
+  ranks: RankRule[];
+  // eslint-disable-next-line no-unused-vars
+  onEdit: (..._args: [RankRule]) => void;
+}) {
+  return (
+    <div className="table-wrap">
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th>Tên hạng</th>
+            <th>Điểm tối thiểu</th>
+            <th>Quyền lợi</th>
+            <th>Trạng thái</th>
+            <th>Thao tác</th>
+          </tr>
+        </thead>
+        <tbody>
+          {ranks.map((rank) => (
+            <tr key={rank.id}>
+              <td className="font-semibold">{rank.name}</td>
+              <td>{rank.minPoints}</td>
+              <td>{rank.benefits || `${rank.minPoints} điểm trở lên`}</td>
+              <td>{rank.status === 'inactive' ? 'Tạm ẩn' : 'Đang dùng'}</td>
+              <td><Button size="sm" variant="ghost" onClick={() => onEdit(rank)}>Chỉnh sửa</Button></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function AdminReputation() {
   const data = useAppSelector(selectData);
+  const admin = useAppSelector(selectCurrentUser)!;
+  const dispatch = useAppDispatch();
+  const [editingRank, setEditingRank] = useState<RankRule | null>(null);
+  const [editingRule, setEditingRule] = useState<ReputationPointRule | null>(null);
+  const [toast, setToast] = useState('');
+  const rankRows = [...data.ranks].sort((a, b) => a.minPoints - b.minPoints);
   return (
     <Panel title="Uy tín & Hạng" description="TrustStars và điểm hạng được theo dõi riêng biệt.">
-      <div className="table-wrap">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Người dùng</th>
-              <th>TrustStars</th>
-              <th>Điểm hạng</th>
-              <th>Hạng hiện tại</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.users.filter((user) => user.role !== 'admin').map((user) => (
-              <tr key={user.id}>
-                <td className="font-semibold">{user.name}</td>
-                <td>{user.reputationStars.toFixed(1)} ★</td>
-                <td>{user.rewardPoints}</td>
-                <td>{user.rank}</td>
+      <section>
+        <h2 className="mb-3 section-title">Uy tín người dùng</h2>
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Người dùng</th>
+                <th>TrustStars</th>
+                <th>Điểm hạng</th>
+                <th>Hạng hiện tại</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {data.users.filter((user) => user.role !== 'admin').map((user) => (
+                <tr key={user.id}>
+                  <td className="font-semibold">{user.name}</td>
+                  <td>{user.reputationStars.toFixed(1)} ★</td>
+                  <td>{user.rewardPoints}</td>
+                  <td>{user.rank}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section className="mt-8">
+        <PageHeader
+          title="Mốc hạng"
+          action={<Button icon="add" onClick={() => setEditingRank(emptyRank())}>Thêm mốc hạng</Button>}
+        />
+        <RankTable ranks={rankRows} onEdit={setEditingRank} />
+      </section>
+      <section className="mt-8">
+        <PageHeader
+          title="Cấu hình cộng / trừ điểm"
+          action={<Button icon="add" onClick={() => setEditingRule(emptyPointRule())}>Thêm quy tắc</Button>}
+        />
+        <PointRuleTable rules={data.pointRules} onEdit={setEditingRule} />
+      </section>
+      {editingRank ? (
+        <RankModal
+          rank={editingRank}
+          onClose={() => setEditingRank(null)}
+          onSave={(name, minPoints, maxPoints, benefits, status) => {
+            if (editingRank.id) {
+              dispatch(actions.updateRankRule({ adminId: admin.id, id: editingRank.id, name, minPoints, maxPoints, benefits, status }));
+            } else {
+              dispatch(actions.addRankRule({ adminId: admin.id, name, minPoints, maxPoints, benefits, status }));
+            }
+            setEditingRank(null);
+            setToast('Đã cập nhật mốc hạng thành công.');
+          }}
+        />
+      ) : null}
+      {editingRule ? (
+        <PointRuleModal
+          rule={editingRule}
+          onClose={() => setEditingRule(null)}
+          onSave={(behavior, type, points, status, description) => {
+            if (editingRule.id) {
+              dispatch(actions.updatePointRule({ adminId: admin.id, id: editingRule.id, behavior, type, points, status, description }));
+            } else {
+              dispatch(actions.addPointRule({ adminId: admin.id, behavior, type, points, status, description }));
+            }
+            setEditingRule(null);
+            setToast('Đã cập nhật quy tắc điểm thành công.');
+          }}
+        />
+      ) : null}
+      {toast ? <Toast message={toast} onClose={() => setToast('')} /> : null}
     </Panel>
+  );
+}
+
+function emptyPointRule(): ReputationPointRule {
+  return {
+    id: '',
+    key: `custom_${Date.now()}`,
+    behavior: '',
+    type: 'plus',
+    points: 0,
+    status: 'active',
+    description: '',
+  };
+}
+
+function PointRuleTable({
+  rules,
+  onEdit,
+}: {
+  rules: ReputationPointRule[];
+  // eslint-disable-next-line no-unused-vars
+  onEdit: (..._args: [ReputationPointRule]) => void;
+}) {
+  const typeLabel = { plus: 'Cộng', minus: 'Trừ' };
+  const statusLabel = { active: 'Đang áp dụng', paused: 'Tạm dừng' };
+  return (
+    <div className="table-wrap">
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th>Hành vi</th>
+            <th>Loại</th>
+            <th>Điểm thay đổi</th>
+            <th>Trạng thái</th>
+            <th>Thao tác</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rules.map((rule) => (
+            <tr key={rule.id}>
+              <td className="font-semibold">{rule.behavior}</td>
+              <td>{typeLabel[rule.type]}</td>
+              <td className={rule.type === 'plus' ? 'text-success' : 'text-error'}>
+                {rule.type === 'plus' ? '+' : '-'}{rule.points}
+              </td>
+              <td>{statusLabel[rule.status]}</td>
+              <td><Button size="sm" variant="ghost" onClick={() => onEdit(rule)}>Chỉnh sửa</Button></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function PointRuleModal({
+  rule,
+  onClose,
+  onSave,
+}: {
+  rule: ReputationPointRule;
+  onClose: () => void;
+  // eslint-disable-next-line no-unused-vars
+  onSave: (..._args: [string, ReputationPointRule['type'], number, ReputationPointRule['status'], string]) => void;
+}) {
+  const [behavior, setBehavior] = useState(rule.behavior);
+  const [type, setType] = useState<ReputationPointRule['type']>(rule.type);
+  const [points, setPoints] = useState(rule.points);
+  const [status, setStatus] = useState<ReputationPointRule['status']>(rule.status);
+  const [description, setDescription] = useState(rule.description);
+  return (
+    <Modal title="Cấu hình quy tắc điểm" onClose={onClose}>
+      <Field label="Tên hành vi" value={behavior} onChange={(event) => setBehavior(event.target.value)} />
+      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+        <Select label="Loại" value={type} onChange={(event) => setType(event.target.value as ReputationPointRule['type'])}>
+          <option value="plus">Cộng</option>
+          <option value="minus">Trừ</option>
+        </Select>
+        <Field label="Số điểm" type="number" min={0} value={points} onChange={(event) => setPoints(Number(event.target.value))} />
+      </div>
+      <Select className="mt-4" label="Trạng thái" value={status} onChange={(event) => setStatus(event.target.value as ReputationPointRule['status'])}>
+        <option value="active">Đang áp dụng</option>
+        <option value="paused">Tạm dừng</option>
+      </Select>
+      <TextArea className="mt-4" label="Mô tả" value={description} onChange={(event) => setDescription(event.target.value)} />
+      <div className="mt-6 flex justify-end gap-2">
+        <Button variant="ghost" onClick={onClose}>Hủy</Button>
+        <Button onClick={() => onSave(behavior, type, points, status, description)}>Lưu thay đổi</Button>
+      </div>
+    </Modal>
   );
 }
 
@@ -1206,6 +1507,21 @@ function AdminStaticContent({
   kind: 'expired' | 'categories' | 'locked' | 'alerts';
 }) {
   const data = useAppSelector(selectData);
+  const navigate = useNavigate();
+  const [categories, setCategories] = useState<CategoryRow[]>(() =>
+    CATEGORIES.map((name) => ({
+      id: name,
+      name,
+      code: name.toLowerCase().replace(/\s+/g, '-'),
+      description: `Danh mục ${name}`,
+      status: 'active' as const,
+    })),
+  );
+  const [editingCategory, setEditingCategory] = useState<CategoryRow | null>(null);
+  const [selectedAlertId, setSelectedAlertId] = useState('');
+  const [inspectedAlerts, setInspectedAlerts] = useState<string[]>([]);
+  const [dismissedAlerts, setDismissedAlerts] = useState<string[]>([]);
+  const [toast, setToast] = useState('');
   const configs = {
     expired: ['Bài quá hạn', 'Theo dõi và xử lý các bài đã hết thời gian hiển thị.'],
     categories: ['Danh mục', 'Quản lý cấu trúc danh mục dùng chung toàn hệ thống.'],
@@ -1213,18 +1529,127 @@ function AdminStaticContent({
     alerts: ['Cảnh báo bất thường', 'Tín hiệu cần kiểm tra từ hoạt động giao dịch và Credit.'],
   } as const;
   const [title, description] = configs[kind];
+  const alertRows = data.transactions
+    .filter((t) => t.status === 'DISPUTED' || t.creditHeldBy.length > 1)
+    .filter((t) => !dismissedAlerts.includes(`alert_${t.id}`));
+  const selectedTx = alertRows.find((tx) => `alert_${tx.id}` === selectedAlertId);
   const rows =
-    kind === 'categories'
-      ? CATEGORIES.map((name) => [name, `${data.items.filter((x) => x.category === name).length} bài`, 'Đang dùng'])
-      : kind === 'locked'
+    kind === 'locked'
         ? data.users.filter((u) => u.status === 'locked').map((u) => [u.name, u.email, 'Đã khóa'])
         : kind === 'expired'
           ? data.items.filter((i) => i.status === 'expired').map((i) => [i.title, i.district, new Date(i.expiresAt).toLocaleDateString('vi-VN')])
-          : data.transactions.filter((t) => t.status === 'DISPUTED' || t.creditHeldBy.length > 1).map((t) => [
-              t.id,
-              t.status === 'DISPUTED' ? 'Giao dịch có khiếu nại' : 'Nhiều bên đã giữ Credit',
-              t.status,
-            ]);
+          : [];
+  if (kind === 'categories') {
+    return (
+      <Panel title={title} description={description}>
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Tên / Mã</th>
+                <th>Thông tin</th>
+                <th>Trạng thái</th>
+                <th>Thao tác</th>
+              </tr>
+            </thead>
+            <tbody>
+              {categories.map((category) => (
+                <tr key={category.id}>
+                  <td className="font-semibold">
+                    {category.name}
+                    <p className="mt-1 text-xs font-normal text-text-muted">{category.code}</p>
+                  </td>
+                  <td>{data.items.filter((x) => x.category === category.name).length} bài</td>
+                  <td>{category.status === 'active' ? 'Đang dùng' : 'Tạm ẩn'}</td>
+                  <td><Button size="sm" variant="ghost" onClick={() => setEditingCategory(category)}>Chỉnh sửa</Button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {editingCategory ? (
+          <CategoryModal
+            category={editingCategory}
+            onClose={() => setEditingCategory(null)}
+            onSave={(nextCategory) => {
+              setCategories((current) =>
+                current.map((entry) => entry.id === editingCategory.id ? { ...nextCategory, id: editingCategory.id } : entry),
+              );
+              setEditingCategory(null);
+              setToast('Đã cập nhật danh mục thành công.');
+            }}
+          />
+        ) : null}
+        {toast ? <Toast message={toast} onClose={() => setToast('')} /> : null}
+      </Panel>
+    );
+  }
+  if (kind === 'alerts') {
+    return (
+      <Panel title={title} description={description}>
+        {alertRows.length ? (
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Tên / Mã</th>
+                  <th>Thông tin</th>
+                  <th>Trạng thái</th>
+                  <th>Thao tác</th>
+                </tr>
+              </thead>
+              <tbody>
+                {alertRows.map((tx) => {
+                  const alertId = `alert_${tx.id}`;
+                  const isInspected = inspectedAlerts.includes(alertId);
+                  return (
+                    <tr key={alertId} className="cursor-pointer" onClick={() => setSelectedAlertId(alertId)}>
+                      <td className="font-semibold">{alertId}</td>
+                      <td>{tx.status === 'DISPUTED' ? 'Giao dịch có khiếu nại' : 'Nhiều bên đã giữ Credit'}</td>
+                      <td>{isInspected ? 'Đã kiểm tra' : tx.status}</td>
+                      <td>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setSelectedAlertId(alertId);
+                          }}
+                        >
+                          Xem chi tiết
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <EmptyState title="Chưa có dữ liệu phù hợp" text="Các bản ghi mới sẽ xuất hiện tại đây." />
+        )}
+        {selectedTx ? (
+          <AlertDetailModal
+            transaction={selectedTx}
+            data={data}
+            inspected={inspectedAlerts.includes(`alert_${selectedTx.id}`)}
+            onClose={() => setSelectedAlertId('')}
+            onInspect={() => {
+              setInspectedAlerts((current) => [...new Set([...current, `alert_${selectedTx.id}`])]);
+              setToast('Đã đánh dấu cảnh báo đã kiểm tra.');
+            }}
+            onDismiss={() => {
+              setDismissedAlerts((current) => [...new Set([...current, `alert_${selectedTx.id}`])]);
+              setSelectedAlertId('');
+              setToast('Đã bỏ qua cảnh báo.');
+            }}
+            onOpenTransaction={() => navigate(`/admin/transactions/${selectedTx.id}`)}
+          />
+        ) : null}
+        {toast ? <Toast message={toast} onClose={() => setToast('')} /> : null}
+      </Panel>
+    );
+  }
   return (
     <Panel title={title} description={description}>
       <SimpleRows rows={rows} />
@@ -1259,6 +1684,109 @@ function SimpleRows({ rows }: { rows: string[][] }) {
   );
 }
 
+type CategoryRow = {
+  id: string;
+  name: string;
+  code: string;
+  description: string;
+  status: 'active' | 'hidden';
+};
+
+function CategoryModal({
+  category,
+  onClose,
+  onSave,
+}: {
+  category: CategoryRow;
+  onClose: () => void;
+  // eslint-disable-next-line no-unused-vars
+  onSave: (..._args: [CategoryRow]) => void;
+}) {
+  const [name, setName] = useState(category.name);
+  const [code, setCode] = useState(category.code);
+  const [description, setDescription] = useState(category.description);
+  const [status, setStatus] = useState<CategoryRow['status']>(category.status);
+  return (
+    <Modal title="Chỉnh sửa danh mục" onClose={onClose}>
+      <Field label="Tên danh mục" value={name} onChange={(event) => setName(event.target.value)} />
+      <Field className="mt-4" label="Mã danh mục" value={code} onChange={(event) => setCode(event.target.value)} />
+      <TextArea className="mt-4" label="Mô tả" value={description} onChange={(event) => setDescription(event.target.value)} />
+      <Select className="mt-4" label="Trạng thái" value={status} onChange={(event) => setStatus(event.target.value as CategoryRow['status'])}>
+        <option value="active">Đang dùng</option>
+        <option value="hidden">Tạm ẩn</option>
+      </Select>
+      <div className="mt-6 flex justify-end gap-2">
+        <Button variant="ghost" onClick={onClose}>Hủy</Button>
+        <Button onClick={() => onSave({ ...category, name, code, description, status })}>Lưu thay đổi</Button>
+      </div>
+    </Modal>
+  );
+}
+
+function AlertDetailModal({
+  transaction,
+  data,
+  inspected,
+  onClose,
+  onInspect,
+  onOpenTransaction,
+  onDismiss,
+}: {
+  transaction: Transaction;
+  data: AppStateData;
+  inspected: boolean;
+  onClose: () => void;
+  onInspect: () => void;
+  onOpenTransaction: () => void;
+  onDismiss: () => void;
+}) {
+  const item = data.items.find((entry) => entry.id === transaction.itemId);
+  const owner = data.users.find((entry) => entry.id === transaction.ownerId);
+  const requester = data.users.find((entry) => entry.id === transaction.requesterId);
+  const alertId = `alert_${transaction.id}`;
+  const alertType = transaction.status === 'DISPUTED' ? 'Giao dịch có khiếu nại' : 'Nhiều bên đã giữ Credit';
+  const relatedLogs = data.auditLogs
+    .filter((log) => log.targetId === transaction.id || log.targetId === transaction.itemId)
+    .slice(0, 5);
+  return (
+    <Modal title="Chi tiết cảnh báo bất thường" onClose={onClose}>
+      <div className="grid gap-3 text-sm sm:grid-cols-2">
+        <Info label="Mã cảnh báo" value={alertId} />
+        <Info label="Mã giao dịch" value={transaction.id} />
+        <Info label="Người liên quan" value={[owner?.name, requester?.name].filter(Boolean).join(' ↔ ')} />
+        <Info label="Loại cảnh báo" value={alertType} />
+        <Info label="Thời gian phát hiện" value={new Date(transaction.createdAt).toLocaleString('vi-VN')} />
+        <Info label="Trạng thái giao dịch" value={transaction.status} />
+        <Info label="Credit liên quan" value={`${transaction.creditHeldBy.length} bên đã giữ Credit`} />
+        <Info label="Trạng thái kiểm tra" value={inspected ? 'Đã kiểm tra' : 'Chưa kiểm tra'} />
+      </div>
+      <div className="mt-4 rounded-md bg-background p-3 text-sm leading-6 text-text-secondary">
+        <p><strong className="text-text-primary">Nội dung cảnh báo:</strong> {item?.title ?? transaction.itemId}</p>
+        <p className="mt-1"><strong className="text-text-primary">Lý do hệ thống đánh dấu:</strong> {alertType}</p>
+      </div>
+      <div className="mt-4">
+        <h3 className="text-sm font-bold">Lịch sử hoạt động liên quan</h3>
+        <div className="mt-2 space-y-2">
+          {relatedLogs.length ? relatedLogs.map((log) => (
+            <div key={log.id} className="rounded-md border border-border px-3 py-2 text-xs text-text-muted">
+              <p className="font-semibold text-text-primary">{log.detail}</p>
+              <p className="mt-0.5">{new Date(log.createdAt).toLocaleString('vi-VN')}</p>
+            </div>
+          )) : (
+            <p className="text-sm text-text-muted">Chưa có lịch sử liên quan trong audit log.</p>
+          )}
+        </div>
+      </div>
+      <div className="mt-6 flex flex-wrap justify-end gap-2">
+        <Button variant="ghost" onClick={onClose}>Đóng</Button>
+        <Button variant="outline" onClick={onInspect}>Đánh dấu đã kiểm tra</Button>
+        <Button variant="secondary" onClick={onOpenTransaction}>Xem giao dịch liên quan</Button>
+        <Button variant="danger" onClick={onDismiss}>Bỏ qua cảnh báo</Button>
+      </div>
+    </Modal>
+  );
+}
+
 function Modal({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-40 grid place-items-end bg-black/30 sm:place-items-center sm:p-4">
@@ -1271,6 +1799,17 @@ function Modal({ title, children, onClose }: { title: string; children: ReactNod
         </div>
         <div className="mt-5">{children}</div>
       </div>
+    </div>
+  );
+}
+
+function Toast({ message, onClose }: { message: string; onClose: () => void }) {
+  return (
+    <div className="fixed bottom-5 right-5 z-50 flex max-w-sm items-center gap-3 rounded-lg bg-text-primary px-4 py-3 text-sm font-semibold text-white shadow-lg">
+      <span>{message}</span>
+      <button onClick={onClose} className="rounded p-1 text-white/80 hover:bg-white/10 hover:text-white">
+        <Icon name="close" className="size-4" />
+      </button>
     </div>
   );
 }

@@ -96,6 +96,11 @@ export function Activities() {
                           Hết hạn {new Date(item.expiresAt).toLocaleDateString('vi-VN')} ·{' '}
                           {item.district}
                         </p>
+                        {item.status === 'rejected' && item.rejectionReason ? (
+                          <p className="mt-2 rounded-md bg-red-50 px-3 py-2 text-xs leading-5 text-error">
+                            Lý do từ chối: {item.rejectionReason}
+                          </p>
+                        ) : null}
                       </div>
                       <div className="flex flex-wrap gap-1 sm:justify-end">
                         <Button

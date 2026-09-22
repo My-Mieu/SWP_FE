@@ -60,6 +60,7 @@ export interface Item {
   images: string[];
   tradeFor?: string;
   status: ItemStatus;
+  rejectionReason?: string;
   postedAt: string;
   expiresAt: string;
 }
@@ -207,13 +208,44 @@ export interface RankRule {
   name: string;
   minPoints: number;
   maxPoints?: number;
+  benefits?: string;
+  status?: 'active' | 'inactive';
+}
+
+export type ReputationPointRuleKey =
+  | 'transaction_completed'
+  | 'handover_confirmed_on_time'
+  | 'valid_complaint'
+  | 'unreasoned_cancel'
+  | 'content_violation'
+  | `custom_${string}`;
+
+export interface ReputationPointRule {
+  id: string;
+  key: ReputationPointRuleKey;
+  behavior: string;
+  type: 'plus' | 'minus';
+  points: number;
+  status: 'active' | 'paused';
+  description: string;
+}
+
+export interface ReputationPointHistory {
+  id: string;
+  userId: string;
+  ruleId: string;
+  event: string;
+  change: number;
+  pointsAfter: number;
+  ref?: string;
+  createdAt: string;
 }
 
 export interface AdminAuditLog {
   id: string;
   adminId: string;
   action: string;
-  targetType: 'user' | 'item' | 'transaction' | 'dispute' | 'setting' | 'keyword' | 'district' | 'complaint' | 'rank';
+  targetType: 'user' | 'item' | 'transaction' | 'dispute' | 'setting' | 'keyword' | 'district' | 'complaint' | 'rank' | 'point_rule';
   targetId: string;
   detail: string;
   createdAt: string;
@@ -244,6 +276,8 @@ export interface AppStateData {
   complaints: Complaint[];
   aiUsage: AiUsageCounter[];
   ranks: RankRule[];
+  pointRules: ReputationPointRule[];
+  pointHistory: ReputationPointHistory[];
   auditLogs: AdminAuditLog[];
   settings: SystemSetting[];
 }

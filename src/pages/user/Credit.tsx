@@ -5,7 +5,7 @@ import { Button, Field, Icon, PageHeader } from '../../components/ui';
 import type { CreditHistory, CreditHistoryType, Topup } from '../../types/domain';
 import { formatCredit, formatVnd } from '../../utils/formatting';
 
-const packages = [10000, 20000, 50000, 100000, 200000];
+const packages = [1000, 2000, 5000, 10000, 20000];
 type Step = 'select' | 'qr' | 'pending';
 type HistoryFilter = 'all' | 'topup' | 'spend' | 'hold' | 'refund';
 
@@ -20,7 +20,7 @@ export function Credit() {
   const user = useAppSelector(selectCurrentUser)!;
   const data = useAppSelector(selectData);
   const dispatch = useAppDispatch();
-  const [creditAmount, setCreditAmount] = useState(50000);
+  const [creditAmount, setCreditAmount] = useState(5000);
   const [customAmount, setCustomAmount] = useState('');
   const [step, setStep] = useState<Step>('select');
   const [transactionCode, setTransactionCode] = useState('');
@@ -230,12 +230,12 @@ function TopupSelection({
           <Field
             label="Số Credit khác"
             type="number"
-            min={10000}
+            min={1000}
             step={1}
             value={customAmount}
             onChange={(event) => onCustomChange(event.target.value)}
             placeholder="Nhập số Credit"
-            hint="Toi thieu 10.000 Credit."
+            hint="Tối thiểu 1.000 Credit."
           />
         </div>
       </div>
@@ -264,7 +264,7 @@ function PaymentSummary({
         <span className="text-sm font-semibold">Tổng thanh toán</span>
         <strong className="text-lg tabular-nums text-primary">{formatVnd(value)}</strong>
       </div>
-      <Button className="mt-5 w-full" size="lg" onClick={onContinue} disabled={creditAmount < 10000}>
+      <Button className="mt-5 w-full" size="lg" onClick={onContinue} disabled={creditAmount < 1000}>
         Tiếp tục thanh toán
       </Button>
       <p className="mt-3 text-center text-[11px] leading-5 text-text-muted">

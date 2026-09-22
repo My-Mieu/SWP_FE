@@ -1,11 +1,12 @@
 import type { AppStateData, CreditHistory, Transaction } from '../types/domain';
 import { canTransition, transitionTransaction } from './transaction';
+import { applyReputationPointEvent } from './reputation';
 
-export const SWAP_PARTY_FEE = 2000;
-export const GIVE_RECEIVER_FEE = 4000;
-export const AI_SWAP_MATCHING_FEE = 5000;
-export const AI_ASSISTANT_SEARCH_FEE = 1000;
-export const TOPUP_MIN_VND = 10000;
+export const SWAP_PARTY_FEE = 200;
+export const GIVE_RECEIVER_FEE = 400;
+export const AI_SWAP_MATCHING_FEE = 500;
+export const AI_ASSISTANT_SEARCH_FEE = 100;
+export const TOPUP_MIN_VND = 1000;
 
 export function txFee(data: AppStateData) {
   const setting = data.settings.find((s) => s.key === 'tx_fee_credit');
@@ -271,6 +272,14 @@ export function spendHeldFee(data: AppStateData, transactionId: string) {
   tx.feeCaptured = true;
   transitionTransaction(tx, 'COMPLETED');
   tx.completedAt = new Date().toISOString();
+  payers.forEach((userId) => {
+    applyReputationPointEvent(data, {
+      userId,
+      key: 'transaction_completed',
+      ref: `${transactionId}:${userId}:transaction_completed`,
+      createdAt: tx.completedAt,
+    });
+  });
   const deadline = new Date(tx.completedAt);
   deadline.setDate(deadline.getDate() + 7);
   tx.complaintDeadline = deadline.toISOString();
