@@ -2,7 +2,7 @@ import { type FormEvent, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../../app/hooks';
 import { actions, selectCurrentUser, selectData } from '../../app/store';
-import { Button, Field, Icon, PageHeader, Select, TextArea } from '../../components/ui';
+import { Alert, Button, Field, Icon, PageHeader, Select, TextArea } from '../../components/ui';
 import { CATEGORIES, CONDITIONS } from '../../constants/domain';
 import { conditionLabel } from '../../utils/formatting';
 import type { ItemCondition, ItemType } from '../../types/domain';
@@ -23,8 +23,14 @@ export function Post() {
   const [description, setDescription] = useState('');
   const [tradeFor, setTradeFor] = useState('');
   const [images, setImages] = useState<string[]>([]);
+  const [error, setError] = useState('');
   const submit = (e: FormEvent) => {
     e.preventDefault();
+    if (user.reputationStars <= 0) {
+      setError('Uy tín của bạn đang ở mức 0 nên hiện không thể đăng bài mới.');
+      return;
+    }
+    setError('');
     dispatch(
       actions.addItem({
         ownerId: user.id,
@@ -50,6 +56,7 @@ export function Post() {
         title="Đăng món đồ"
         description="Thông tin rõ ràng giúp món đồ sớm tìm được người phù hợp."
       />
+      {error ? <Alert tone="error">{error}</Alert> : null}
       <form onSubmit={submit} className="grid gap-6 lg:grid-cols-[1fr_280px]">
         <section className="space-y-5 rounded-xl bg-white p-5 ring-1 ring-border/80 sm:p-6">
           <div>

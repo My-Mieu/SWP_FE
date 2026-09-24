@@ -3,6 +3,7 @@ import {
   AI_ASSISTANT_SEARCH_FEE,
   AI_SWAP_MATCHING_FEE,
   TOPUP_MIN_VND,
+  CREDIT_TO_VND,
   assertWalletInvariant,
   canPayTransactionFees,
   holdAllTransactionFees,
@@ -26,6 +27,8 @@ import type {
 } from '../types/domain';
 import { canTransition, transitionTransaction } from '../utils/transaction';
 import { applyReputationPointEvent, rankFor } from '../utils/reputation';
+import { inspectContactMessage, contactSafetyLayer1 } from '../utils/contactSafety';
+import { isPasswordHash } from '../utils/passwordSecurity';
 
 const initialState: AppStateData = loadPersistedState();
 let idSequence = 0;
@@ -43,10 +46,9 @@ const recalculateUserRanks = (state: AppStateData) => {
     if (user.role !== 'admin') user.rank = rankFor(user.rewardPoints, state.ranks);
   });
 };
-const hasContactInfo = (text: string) =>
-  /(?:\+?84|0)(?:[\s.-]?\d){8,10}\b/.test(text) ||
-  /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(text) ||
-  /(https?:\/\/|www\.|zalo|facebook|telegram|viber)/i.test(text);
+const itemApproved = (status: Item['status']) => status === 'approved' || status === 'APPROVED';
+const reputationBlocked = (state: AppStateData, userId: string) =>
+  state.users.find((user) => user.id === userId)?.reputationStars === 0;
 
 const addSystemMessage = (state: AppStateData, transactionId: string, text: string) => {
   const conv = state.conversations.find((entry) => entry.transactionId === transactionId);
@@ -74,14 +76,23 @@ const dataSlice = createSlice({
   name: 'data',
   initialState,
   reducers: {
-    login(state, action: PayloadAction<{ username: string; password: string }>) {
+    login(state, action: PayloadAction<{ username: string; passwordHash: string }>) {
       const user = state.users.find(
         (item) =>
           item.username === action.payload.username &&
-          item.password === action.payload.password &&
+          item.password === action.payload.passwordHash &&
           item.status !== 'locked',
       );
       state.currentUserId = user?.status === 'active' ? user.id : null;
+    },
+    demoLogin(state, action: PayloadAction<{ username: 'user' | 'admin'; role: 'user' | 'admin' }>) {
+      const user = state.users.find(
+        (entry) =>
+          entry.username === action.payload.username &&
+          entry.role === action.payload.role &&
+          entry.status === 'active',
+      );
+      state.currentUserId = user?.id ?? null;
     },
     logout(state) {
       state.currentUserId = null;
@@ -91,7 +102,7 @@ const dataSlice = createSlice({
       action: PayloadAction<{
         name: string;
         username: string;
-        password: string;
+        passwordHash: string;
         district: string;
         phone: string;
       }>,
@@ -100,7 +111,7 @@ const dataSlice = createSlice({
       state.users.push({
         id,
         username: action.payload.username,
-        password: action.payload.password,
+        password: action.payload.passwordHash,
         name: action.payload.name,
         email: `${action.payload.username}@example.com`,
         phone: action.payload.phone,
@@ -124,14 +135,93 @@ const dataSlice = createSlice({
       });
       state.currentUserId = id;
     },
+    changePassword(
+      state,
+      action: PayloadAction<{ userId: string; currentPasswordHash: string; newPasswordHash: string }>,
+    ) {
+      const user = state.users.find((entry) => entry.id === action.payload.userId);
+      if (
+        !user ||
+        state.currentUserId !== user.id ||
+        !isPasswordHash(action.payload.currentPasswordHash) ||
+        !isPasswordHash(action.payload.newPasswordHash) ||
+        user.password !== action.payload.currentPasswordHash ||
+        user.password === action.payload.newPasswordHash
+      ) return;
+      user.password = action.payload.newPasswordHash;
+    },
+    requestPasswordReset(
+      state,
+      action: PayloadAction<{ email: string; otpHash: string; resetId: string; resetToken: string; expiresAt: string; resendAvailableAt: string }>,
+    ) {
+      state.passwordReset = undefined;
+      const user = state.users.find((entry) => entry.email.toLowerCase() === action.payload.email.trim().toLowerCase());
+      if (!isPasswordHash(action.payload.otpHash)) return;
+      state.passwordReset = {
+        id: action.payload.resetId,
+        email: action.payload.email.trim().toLowerCase(),
+        userId: user?.id,
+        otpHash: action.payload.otpHash,
+        expiresAt: action.payload.expiresAt,
+        resendAvailableAt: action.payload.resendAvailableAt,
+        attempts: 0,
+        verified: false,
+        resetToken: action.payload.resetToken,
+      };
+    },
+    resendPasswordOtp(
+      state,
+      action: PayloadAction<{ resetId: string; otpHash: string; expiresAt: string; resendAvailableAt: string }>,
+    ) {
+      const reset = state.passwordReset;
+      if (!reset || reset.id !== action.payload.resetId || reset.verified || Date.now() < new Date(reset.resendAvailableAt).getTime()) return;
+      if (!isPasswordHash(action.payload.otpHash)) return;
+      reset.otpHash = action.payload.otpHash;
+      reset.expiresAt = action.payload.expiresAt;
+      reset.resendAvailableAt = action.payload.resendAvailableAt;
+      reset.attempts = 0;
+    },
+    verifyPasswordOtp(state, action: PayloadAction<{ resetId: string; otpHash: string }>) {
+      const reset = state.passwordReset;
+      if (!reset || reset.id !== action.payload.resetId || reset.verified || Date.now() > new Date(reset.expiresAt).getTime() || reset.attempts >= 5) return;
+      if (reset.otpHash !== action.payload.otpHash) {
+        reset.attempts += 1;
+        return;
+      }
+      reset.otpHash = '';
+      reset.verified = true;
+    },
+    resetPassword(
+      state,
+      action: PayloadAction<{ resetId: string; resetToken: string; newPasswordHash: string }>,
+    ) {
+      const reset = state.passwordReset;
+      const user = state.users.find((entry) => entry.id === reset?.userId);
+      if (!reset || !user || reset.id !== action.payload.resetId || reset.resetToken !== action.payload.resetToken || !reset.verified || !isPasswordHash(action.payload.newPasswordHash)) return;
+      user.password = action.payload.newPasswordHash;
+      state.passwordReset = undefined;
+      state.currentUserId = null;
+    },
     addItem(state, action: PayloadAction<Omit<Item, 'id' | 'postedAt' | 'expiresAt' | 'status'>>) {
+      if (reputationBlocked(state, action.payload.ownerId)) return;
       const now = new Date();
       const exp = new Date(now);
       exp.setMonth(exp.getMonth() + 2);
+      const combined = `${action.payload.title} ${action.payload.description} ${action.payload.tradeFor ?? ''}`;
+      const fixedRuleViolation = contactSafetyLayer1(combined).blocked ||
+        state.keywords.some((keyword) =>
+          keyword.action === 'block' && combined.toLocaleLowerCase().includes(keyword.keyword.toLocaleLowerCase()),
+        ) ||
+        action.payload.title.trim().length < 3 ||
+        action.payload.description.trim().length < 10 ||
+        !action.payload.images.length;
       state.items.unshift({
         ...action.payload,
         id: `item_${Date.now()}`,
-        status: 'pending',
+        status: fixedRuleViolation ? 'VIOLATION' : 'PENDING_REVIEW',
+        moderationReason: fixedRuleViolation
+          ? 'Bài đăng không vượt qua kiểm tra tự động. Vui lòng rà soát thông tin liên hệ, nội dung và hình ảnh.'
+          : undefined,
         postedAt: now.toISOString(),
         expiresAt: exp.toISOString(),
       });
@@ -152,7 +242,7 @@ const dataSlice = createSlice({
       );
       if (!item) return;
       Object.assign(item, action.payload.changes);
-      item.status = 'pending';
+      item.status = 'PENDING_REVIEW';
       item.rejectionReason = undefined;
     },
     removeItem(state, action: PayloadAction<{ itemId: string; ownerId: string }>) {
@@ -169,7 +259,7 @@ const dataSlice = createSlice({
       const expiresAt = new Date();
       expiresAt.setMonth(expiresAt.getMonth() + 2);
       item.expiresAt = expiresAt.toISOString();
-      item.status = 'pending';
+      item.status = 'PENDING_REVIEW';
     },
     updateProfile(
       state,
@@ -208,9 +298,12 @@ const dataSlice = createSlice({
       const item = state.items.find((entry) => entry.id === action.payload.itemId);
       if (!item || !activeAdmin(state, action.payload.adminId)) return;
       const rejectionReason = action.payload.rejectionReason?.trim();
-      if (action.payload.status === 'rejected' && !rejectionReason) return;
-      item.status = action.payload.status;
-      item.rejectionReason = action.payload.status === 'rejected' ? rejectionReason : undefined;
+      if ((action.payload.status === 'rejected' || action.payload.status === 'REJECTED') && !rejectionReason) return;
+      const nextStatus = action.payload.status === 'approved' ? 'APPROVED' :
+        action.payload.status === 'rejected' ? 'REJECTED' : action.payload.status;
+      item.status = nextStatus;
+      item.rejectionReason = nextStatus === 'REJECTED' ? rejectionReason : undefined;
+      item.moderationReason = rejectionReason;
       state.auditLogs.unshift({
         id: `log_${Date.now()}`,
         adminId: action.payload.adminId,
@@ -221,7 +314,7 @@ const dataSlice = createSlice({
         createdAt: new Date().toISOString(),
       });
       if (
-        action.payload.status === 'rejected' &&
+        (action.payload.status === 'rejected' || action.payload.status === 'REJECTED') &&
         item.rejectionReason &&
         /vi phạm|bị cấm|cam|vi pham/i.test(item.rejectionReason)
       ) {
@@ -243,22 +336,25 @@ const dataSlice = createSlice({
       if (
         !item ||
         item.ownerId === action.payload.requesterId ||
-        item.status !== 'approved' ||
+        !itemApproved(item.status) ||
+        reputationBlocked(state, action.payload.requesterId) ||
         (sourceItem &&
           (sourceItem.ownerId !== action.payload.requesterId ||
             sourceItem.type !== 'trade' ||
-            sourceItem.status !== 'approved' ||
+            !itemApproved(sourceItem.status) ||
             item.type !== 'trade')) ||
         !activeActor(state, action.payload.requesterId)
       )
         return;
       const requester = state.users.find((entry) => entry.id === action.payload.requesterId);
       const requiredCredit = requiredCreditForItemType(item.type);
-      if (!requester || requester.availableCredit < requiredCredit) {
-        const message =
-          item.type === 'trade'
-            ? `Ban can it nhat ${requiredCredit.toLocaleString('vi-VN')} Credit de tham gia giao dich nay.`
-            : `Ban can it nhat ${requiredCredit.toLocaleString('vi-VN')} Credit de nhan mon do nay.`;
+      const payerIdsForStart = item.type === 'trade' ? [item.ownerId, action.payload.requesterId] : [action.payload.requesterId];
+      const insufficient = payerIdsForStart.some((userId) => {
+        const payer = state.users.find((entry) => entry.id === userId);
+        return !payer || payer.availableCredit < (userId === item.ownerId && item.type === 'trade' ? 2 : requiredCredit);
+      });
+      if (!requester || insufficient) {
+        const message = 'Bạn không đủ Credit để thực hiện thao tác này.';
         state.auditLogs.unshift({
           id: uniqueId('log'),
           adminId: action.payload.requesterId,
@@ -278,6 +374,7 @@ const dataSlice = createSlice({
         ownerId: item.ownerId,
         type: item.type,
         feeCredit: txFee(state),
+        feeCharged: false,
         status: 'NEGOTIATING',
         creditHeldBy: [],
         creditHeld: false,
@@ -558,19 +655,22 @@ const dataSlice = createSlice({
       if (!complaint) return;
       const allowed =
         (complaint.status === 'received' && action.payload.status === 'processing') ||
-        (complaint.status === 'processing' && action.payload.status === 'resolved') ||
+        (complaint.status === 'processing' &&
+          (action.payload.status === 'violation_confirmed' || action.payload.status === 'rejected')) ||
         complaint.status === action.payload.status;
       if (!allowed) return;
       complaint.status = action.payload.status;
       complaint.adminNote = action.payload.adminNote ?? complaint.adminNote;
       complaint.resolution = action.payload.resolution ?? complaint.resolution;
-      if (action.payload.status === 'resolved') {
+      if (action.payload.status === 'violation_confirmed') {
         complaint.resolvedAt = new Date().toISOString();
         applyReputationPointEvent(state, {
           userId: complaint.reportedUserId,
           key: 'valid_complaint',
           ref: `${complaint.id}:valid_complaint`,
         });
+      } else if (action.payload.status === 'rejected') {
+        complaint.resolvedAt = new Date().toISOString();
       }
     },
     updateRankRule(
@@ -740,13 +840,13 @@ const dataSlice = createSlice({
         !action.payload.text.trim()
       )
         return;
-      if (!tx.creditHeld && hasContactInfo(action.payload.text)) {
+      if (!tx.creditHeld && inspectContactMessage(action.payload.text).blocked) {
         state.messages.push({
           id: uniqueId('msg'),
           convId: action.payload.convId,
           sender: 'system',
           type: 'system',
-          text: 'Tin nhan co thong tin lien he ngoai he thong. Thong tin nay chi mo khoa sau khi hai ben chot lich va giu Credit thanh cong.',
+          text: 'Không thể gửi thông tin liên hệ trước khi hai bên xác nhận lịch hẹn.',
           time: 'Bay gio',
         });
         return;
@@ -774,7 +874,6 @@ const dataSlice = createSlice({
         action.payload.vnd % 1000 !== 0
       )
         return;
-      const amount = action.payload.vnd;
       const id = action.payload.id ?? uniqueId('top');
       const code = action.payload.code ?? uniqueId('SLTOPUP');
       if (
@@ -788,7 +887,7 @@ const dataSlice = createSlice({
         id,
         code,
         userId: user.id,
-        amount,
+        amount: action.payload.vnd / CREDIT_TO_VND,
         vnd: action.payload.vnd,
         method: 'QR Banking',
         status: 'pending',
@@ -807,7 +906,7 @@ const dataSlice = createSlice({
         topup.vnd <= 0 ||
         topup.vnd < TOPUP_MIN_VND ||
         topup.vnd % 1000 !== 0 ||
-        topup.amount !== topup.vnd ||
+        topup.amount !== topup.vnd / CREDIT_TO_VND ||
         !Number.isSafeInteger(user.totalCredit + topup.amount) ||
         !Number.isSafeInteger(user.availableCredit + topup.amount) ||
         state.creditHistory.some((entry) => entry.ref === topup.id)
@@ -865,24 +964,21 @@ const dataSlice = createSlice({
         };
         state.aiUsage.push(counter);
       }
-      const freeLimit = action.payload.feature === 'SWAP_MATCHING' ? 1 : 5;
       const fee =
         action.payload.feature === 'SWAP_MATCHING'
           ? AI_SWAP_MATCHING_FEE
           : AI_ASSISTANT_SEARCH_FEE;
-      if (counter.count >= freeLimit) {
-        const paid = spendAvailableCredit(state, {
-          userId: action.payload.userId,
-          amount: fee,
-          type: 'AI_SPEND',
-          ref: `ai:${action.payload.feature}:${action.payload.userId}:${Date.now()}`,
-          description:
-            action.payload.feature === 'SWAP_MATCHING'
-              ? 'Phi AI goi y ghep doi Swap'
-              : 'Phi AI tro ly tim do',
-        });
-        if (!paid) return;
-      }
+      const paid = spendAvailableCredit(state, {
+        userId: action.payload.userId,
+        amount: fee,
+        type: 'AI_SPEND',
+        ref: `ai:${action.payload.feature}:${action.payload.userId}:${Date.now()}`,
+        description:
+          action.payload.feature === 'SWAP_MATCHING'
+            ? 'Phí AI gợi ý ghép đôi Swap'
+            : 'Phí AI trợ lý tìm đồ',
+      });
+      if (!paid) return;
       counter.count += 1;
     },
     adminAdjustCredit(

@@ -1,12 +1,14 @@
 import { createBrowserRouter } from 'react-router-dom';
 import { AppShell } from '../layouts/AppShell';
-import { AdminRoute, GuestOnlyRoute, ProtectedRoute, PublicRoute } from '../routes/Guards';
+import { AdminRoute, GuestOnlyRoute, ProfileRoute, ProtectedRoute, PublicRoute } from '../routes/Guards';
 import { Home } from '../pages/public/Home';
 import { Browse } from '../pages/public/Browse';
 import { ProductDetail } from '../pages/public/ProductDetail';
 import { AI } from '../pages/public/AI';
 import { Login } from '../pages/auth/Login';
 import { Register } from '../pages/auth/Register';
+import { ForgotPassword } from '../pages/auth/ForgotPassword';
+import { ChangePassword } from '../pages/auth/ChangePassword';
 import { Post } from '../pages/user/Post';
 import { Activities } from '../pages/user/Activities';
 import { Messages } from '../pages/user/Messages';
@@ -47,6 +49,7 @@ export const router = createBrowserRouter([
         children: [
           { path: '/login', element: <Login /> },
           { path: '/register', element: <Register /> },
+          { path: '/forgot-password', element: <ForgotPassword /> },
         ],
       },
       {
@@ -55,9 +58,12 @@ export const router = createBrowserRouter([
           { path: '/post', element: <Post /> },
           { path: '/activities', element: <Activities /> },
           { path: '/messages', element: <Messages /> },
-          { path: '/profile', element: <Profile /> },
           { path: '/credit', element: <Credit /> },
         ],
+      },
+      {
+        element: <ProfileRoute />,
+        children: [{ path: '/profile', element: <Profile /> }, { path: '/change-password', element: <ChangePassword /> }],
       },
       {
         element: <AdminRoute />,

@@ -1,17 +1,19 @@
 import { useMemo, useState, type Dispatch } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../../app/hooks';
 import { actions, selectCurrentUser, selectData } from '../../app/store';
 import { Button, Field, Icon, PageHeader } from '../../components/ui';
 import type { CreditHistory, CreditHistoryType, Topup } from '../../types/domain';
 import { formatCredit, formatVnd } from '../../utils/formatting';
+import { CREDIT_TO_VND } from '../../utils/credit';
 
-const packages = [1000, 2000, 5000, 10000, 20000];
+const packages = [1, 2, 5, 10, 20];
 type Step = 'select' | 'qr' | 'pending';
 type HistoryFilter = 'all' | 'topup' | 'spend' | 'hold' | 'refund';
 
 const filterTypes: Record<Exclude<HistoryFilter, 'all'>, CreditHistoryType[]> = {
   topup: ['TOPUP'],
-  spend: ['SPEND', 'AI_SPEND'],
+  spend: ['TRANSACTION_FEE', 'SPEND', 'AI_SPEND'],
   hold: ['HOLD'],
   refund: ['REFUND', 'RELEASE_HOLD'],
 };
@@ -20,17 +22,19 @@ export function Credit() {
   const user = useAppSelector(selectCurrentUser)!;
   const data = useAppSelector(selectData);
   const dispatch = useAppDispatch();
-  const [creditAmount, setCreditAmount] = useState(5000);
+  const navigate = useNavigate();
+  const [creditAmount, setCreditAmount] = useState(5);
   const [customAmount, setCustomAmount] = useState('');
   const [step, setStep] = useState<Step>('select');
   const [transactionCode, setTransactionCode] = useState('');
   const [activeTopupId, setActiveTopupId] = useState('');
   const [historyFilter, setHistoryFilter] = useState<HistoryFilter>('all');
+  const [selectedEntry, setSelectedEntry] = useState<CreditHistory | Topup | null>(null);
 
   const topups = data.topups.filter((topup) => topup.userId === user.id);
   const activeTopup = topups.find((topup) => topup.id === activeTopupId);
   const latestCompleted = topups.find((topup) => topup.status === 'completed');
-  const paymentValue = creditAmount;
+  const paymentValue = creditAmount * CREDIT_TO_VND;
 
   const allHistory = useMemo(
     () =>
@@ -39,6 +43,13 @@ export function Credit() {
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
     [data.creditHistory, user.id],
   );
+
+  const selectedRelatedTransaction = selectedEntry && 'relatedTransactionId' in selectedEntry
+    ? data.transactions.find((tx) => tx.id === selectedEntry.relatedTransactionId)
+    : undefined;
+  const selectedRelatedItem = selectedRelatedTransaction
+    ? data.items.find((item) => item.id === selectedRelatedTransaction.itemId)
+    : undefined;
 
   const history = useMemo(() => {
     const entries = allHistory;
@@ -97,7 +108,7 @@ export function Credit() {
             <div className="mt-3 text-4xl font-bold tabular-nums sm:text-5xl">
               {formatCredit(user.totalCredit)}
             </div>
-            <p className="mt-3 text-sm text-white/70">1 Credit = 1đ</p>
+            <p className="mt-3 text-sm text-white/70">1 Credit = 1.000đ</p>
           </div>
           <button
             className="inline-flex min-h-11 items-center justify-center rounded-md bg-white px-4 py-2 text-sm font-bold text-primary shadow-sm transition duration-200 hover:bg-primary-soft active:translate-y-px"
@@ -162,7 +173,19 @@ export function Credit() {
         }
         activeFilter={historyFilter}
         onFilterChange={setHistoryFilter}
+        onSelect={setSelectedEntry}
       />
+      {selectedEntry ? (
+        <CreditTransactionDetail
+          entry={selectedEntry}
+          onClose={() => setSelectedEntry(null)}
+          relatedTransactionId={selectedRelatedTransaction?.id}
+          relatedItemTitle={selectedRelatedItem?.title}
+          relatedTransactionType={selectedRelatedTransaction?.type}
+          balanceAfter={'balance' in selectedEntry ? selectedEntry.balance : undefined}
+          onViewTransaction={selectedRelatedTransaction ? () => navigate('/messages') : undefined}
+        />
+      ) : null}
     </div>
   );
 }
@@ -220,7 +243,7 @@ function TopupSelection({
                 ) : null}
                 <strong className="block text-base text-text-primary">{amount} Credit</strong>
                 <span className="mt-1 block text-xs text-text-muted">
-                  {formatVnd(amount)}
+                  {formatVnd(amount * CREDIT_TO_VND)}
                 </span>
               </button>
             );
@@ -230,12 +253,12 @@ function TopupSelection({
           <Field
             label="Số Credit khác"
             type="number"
-            min={1000}
+            min={1}
             step={1}
             value={customAmount}
             onChange={(event) => onCustomChange(event.target.value)}
             placeholder="Nhập số Credit"
-            hint="Tối thiểu 1.000 Credit."
+            hint="Tối thiểu 1 Credit."
           />
         </div>
       </div>
@@ -251,7 +274,7 @@ function PaymentSummary({
   creditAmount: number;
   onContinue: () => void;
 }) {
-  const value = creditAmount;
+  const value = creditAmount * CREDIT_TO_VND;
   return (
     <aside className="h-fit rounded-xl bg-white p-5 ring-1 ring-border/80 sm:p-6 lg:sticky lg:top-24">
       <h2 className="text-base font-bold">Tóm tắt thanh toán</h2>
@@ -264,7 +287,7 @@ function PaymentSummary({
         <span className="text-sm font-semibold">Tổng thanh toán</span>
         <strong className="text-lg tabular-nums text-primary">{formatVnd(value)}</strong>
       </div>
-      <Button className="mt-5 w-full" size="lg" onClick={onContinue} disabled={creditAmount < 1000}>
+      <Button className="mt-5 w-full" size="lg" onClick={onContinue} disabled={creditAmount < 1}>
         Tiếp tục thanh toán
       </Button>
       <p className="mt-3 text-center text-[11px] leading-5 text-text-muted">
@@ -312,7 +335,7 @@ function QrPayment({
           </div>
           <div>
             <dl className="space-y-3 rounded-lg bg-background p-4 text-sm">
-              <SummaryRow label="Số tiền" value={formatVnd(creditAmount)} />
+              <SummaryRow label="Số tiền" value={formatVnd(creditAmount * CREDIT_TO_VND)} />
               <SummaryRow label="Credit nhận" value={`${creditAmount} Credit`} />
               <SummaryRow label="Mã giao dịch" value={transactionCode} />
             </dl>
@@ -386,12 +409,14 @@ function CreditHistorySection({
   pendingTopups,
   activeFilter,
   onFilterChange,
+  onSelect,
 }: {
   allHistory: CreditHistory[];
   history: CreditHistory[];
   pendingTopups: Topup[];
   activeFilter: HistoryFilter;
   onFilterChange: Dispatch<HistoryFilter>;
+  onSelect: (entry: CreditHistory | Topup) => void;
 }) {
   const countFor = (filter: HistoryFilter) => {
     const pendingCount = filter === 'all' || filter === 'topup' ? pendingTopups.length : 0;
@@ -432,6 +457,7 @@ function CreditHistorySection({
             amount={topup.amount}
             status="Đang xác nhận"
             tone="pending"
+            onClick={() => onSelect(topup)}
           />
         ))}
         {history.map((entry) => (
@@ -444,6 +470,7 @@ function CreditHistorySection({
             amount={entry.amount}
             status={historyStatus(entry)}
             tone={historyTone(entry)}
+            onClick={() => onSelect(entry)}
           />
         ))}
         {!pendingTopups.length && !history.length ? (
@@ -464,6 +491,7 @@ function HistoryRow({
   amount,
   status,
   tone,
+  onClick,
 }: {
   icon: 'wallet' | 'payments' | 'history' | 'renew';
   title: string;
@@ -472,6 +500,7 @@ function HistoryRow({
   amount: number;
   status: string;
   tone: 'positive' | 'negative' | 'hold' | 'pending';
+  onClick: () => void;
 }) {
   const amountClass =
     tone === 'positive'
@@ -483,7 +512,7 @@ function HistoryRow({
           : 'text-text-secondary';
   const prefix = amount > 0 ? '+' : '';
   return (
-    <div className="grid grid-cols-[1fr_auto] gap-4 border-b border-border/70 px-4 py-4 last:border-0 sm:px-5">
+    <button type="button" onClick={onClick} className="grid w-full cursor-pointer grid-cols-[1fr_auto_auto] gap-4 border-b border-border/70 px-4 py-4 text-left transition hover:bg-surface-low last:border-0 sm:px-5">
       <div className="flex min-w-0 gap-3">
         <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-md bg-surface-low text-primary">
           <Icon name={icon} className="size-5" />
@@ -502,13 +531,15 @@ function HistoryRow({
         </strong>
         <span className="mt-1 block text-xs text-text-muted">{status}</span>
       </div>
-    </div>
+      <Icon name="chevronDown" className="-rotate-90 self-center text-text-muted" />
+    </button>
   );
 }
 
 function historyTitle(entry: CreditHistory) {
   const labels: Record<CreditHistoryType, string> = {
     TOPUP: 'Nạp Credit',
+    TRANSACTION_FEE: 'Phí giao dịch',
     SPEND: 'Phí giao dịch',
     AI_SPEND: 'Phí dịch vụ AI',
     HOLD: 'Giữ phí giao dịch',
@@ -540,4 +571,82 @@ function historyIcon(entry: CreditHistory): 'wallet' | 'payments' | 'history' | 
   if (entry.type === 'HOLD') return 'history';
   if (entry.type === 'REFUND' || entry.type === 'RELEASE_HOLD') return 'renew';
   return 'payments';
+}
+
+function CreditTransactionDetail({
+  entry,
+  relatedTransactionId,
+  relatedItemTitle,
+  relatedTransactionType,
+  balanceAfter,
+  onClose,
+  onViewTransaction,
+}: {
+  entry: CreditHistory | Topup;
+  relatedTransactionId?: string;
+  relatedItemTitle?: string;
+  relatedTransactionType?: 'gift' | 'trade';
+  balanceAfter?: number;
+  onClose: () => void;
+  onViewTransaction?: () => void;
+}) {
+  const isTopup = 'method' in entry;
+  const historyEntry = isTopup ? undefined : entry;
+  const isHold = historyEntry?.type === 'HOLD' && historyEntry.status === 'holding';
+  const typeLabel = isTopup
+    ? 'Nạp Credit'
+    : historyEntry?.type === 'TRANSACTION_FEE' || historyEntry?.type === 'SPEND'
+      ? 'Phí mở giao dịch Cho - Nhận'
+      : historyEntry?.type === 'HOLD'
+        ? 'Tạm giữ phí giao dịch'
+        : historyEntry ? historyTitle(historyEntry) : '';
+  const status = isTopup
+    ? entry.status === 'pending' ? 'Đang xác nhận' : 'Hoàn tất'
+    : historyEntry ? historyStatus(historyEntry) : '';
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-4" onMouseDown={onClose}>
+      <div role="dialog" aria-modal="true" aria-labelledby="credit-detail-title" className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-6 shadow-2xl sm:p-7" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="flex items-start justify-between gap-4">
+          <h2 id="credit-detail-title" className="text-xl font-bold text-text-primary">Chi tiết giao dịch Credit</h2>
+          <button type="button" aria-label="Đóng" onClick={onClose} className="rounded-md p-1 text-text-muted hover:bg-surface-low hover:text-text-primary">
+            <Icon name="close" className="size-5" />
+          </button>
+        </div>
+        <dl className="mt-6 divide-y divide-border rounded-lg bg-surface-low px-4">
+          <DetailRow label="Mã giao dịch" value={isTopup ? entry.code : entry.transactionId} />
+          <DetailRow label="Loại giao dịch" value={typeLabel} />
+          {isTopup ? (
+            <>
+              <DetailRow label="Phương thức" value="QR" />
+              <DetailRow label="Số Credit nhận được" value={`+${entry.amount} Credit`} valueClass="text-success" />
+              <DetailRow label="Số tiền thanh toán" value={formatVnd(entry.vnd)} />
+            </>
+          ) : (
+            <DetailRow label={isHold ? 'Số Credit đang giữ' : 'Số Credit'} value={`${entry.amount > 0 ? '+' : ''}${entry.amount} Credit`} valueClass={historyTone(entry) === 'negative' ? 'text-error' : historyTone(entry) === 'hold' ? 'text-warning' : 'text-success'} />
+          )}
+          {!isTopup ? <DetailRow label="Giá trị quy đổi" value={formatVnd(Math.abs(entry.amount) * CREDIT_TO_VND)} /> : null}
+          <DetailRow label={isHold ? 'Thời gian giữ' : 'Thời gian'} value={formatDateTime(entry.createdAt)} />
+          <DetailRow label="Trạng thái" value={status} />
+          {(!isTopup || balanceAfter !== undefined) ? <DetailRow label="Số dư sau giao dịch" value={`${isTopup ? (balanceAfter ?? entry.amount) : entry.balance} Credit`} /> : null}
+        </dl>
+        {relatedTransactionId && relatedItemTitle ? (
+          <div className="mt-5 rounded-lg border border-border p-4 text-sm">
+            <p className="font-semibold text-text-primary">Giao dịch liên quan</p>
+            <p className="mt-2 text-text-secondary">Tên món đồ: {relatedItemTitle}</p>
+            <p className="mt-1 text-text-secondary">Hình thức: {relatedTransactionType === 'trade' ? 'Trao đổi' : 'Cho - Nhận'}</p>
+            {onViewTransaction ? <Button className="mt-4" size="sm" onClick={onViewTransaction}>Xem giao dịch</Button> : null}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function DetailRow({ label, value, valueClass = 'text-text-primary' }: { label: string; value: string; valueClass?: string }) {
+  return <div className="flex items-center justify-between gap-4 py-3 text-sm"><dt className="text-text-muted">{label}</dt><dd className={`text-right font-semibold ${valueClass}`}>{value}</dd></div>;
+}
+
+function formatDateTime(value: string) {
+  return new Date(value).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }

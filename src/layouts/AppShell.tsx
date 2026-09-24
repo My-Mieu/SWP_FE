@@ -15,11 +15,23 @@ function ScrollToTop() {
 }
 
 export function AppShell() {
+  const { pathname } = useLocation();
   const user = useAppSelector(selectCurrentUser);
+  const isAdmin = user?.role === 'admin';
+  const isHome = pathname === '/' && !isAdmin;
   const dispatch = useAppDispatch();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
-  const nav = user
+  const nav = isAdmin
+    ? [
+        ['/admin', 'Dashboard', 'dashboard'],
+        ['/admin/moderation', 'Quản lý món đồ', 'article'],
+        ['/admin/users', 'Người dùng', 'group'],
+        ['/admin/complaints', 'Báo cáo / Khiếu nại', 'shield'],
+        ['/admin/transactions', 'Giao dịch', 'transaction'],
+        ['/admin/finance', 'Thống kê', 'activity'],
+      ]
+    : user
     ? [
         ['/', 'Trang chủ', 'home'],
         ['/browse', 'Tìm đồ', 'browse'],
@@ -45,14 +57,26 @@ export function AppShell() {
       >
         Bỏ qua điều hướng
       </a>
-      <header className="sticky top-0 z-30 border-b border-border/80 bg-white/95 backdrop-blur-md">
-        <div className="mx-auto flex h-[68px] max-w-[1280px] items-center gap-5 px-4 sm:px-6 lg:px-8">
-          <Link to="/" onClick={closeMenus} className="flex shrink-0 items-center gap-2.5">
-            <span className="grid size-9 place-items-center rounded-md bg-primary text-white">
+      <header
+        className={`top-0 z-30 border-b backdrop-blur-md ${
+          isHome
+            ? 'absolute inset-x-0 border-white/15 bg-black/10 text-white'
+            : 'sticky border-border/80 bg-white/95'
+        }`}
+      >
+        <div className="mx-auto flex h-[68px] w-full max-w-[1500px] items-center gap-5 px-6 md:px-8 lg:px-12 xl:px-14">
+          <Link to={isAdmin ? '/admin' : '/'} onClick={closeMenus} className="flex shrink-0 items-center gap-2.5">
+            <span
+              className={`grid size-9 place-items-center rounded-md text-white ${
+                isHome ? 'bg-white/15 ring-1 ring-white/25' : 'bg-primary'
+              }`}
+            >
               <Icon name="renew" className="size-5" weight="bold" />
             </span>
-            <span className="text-base font-extrabold text-text-primary">
-              SHARE<span className="text-primary">LOOP</span>
+            <span
+              className={`text-base font-extrabold ${isHome ? 'text-white' : 'text-text-primary'}`}
+            >
+              {isAdmin ? 'SHARELOOP ADMIN' : <>SHARE<span className={isHome ? 'text-primary-fixed' : 'text-primary'}>LOOP</span></>}
             </span>
           </Link>
           <nav className="hidden min-w-0 flex-1 items-center gap-0.5 lg:flex">
@@ -62,7 +86,15 @@ export function AppShell() {
                 key={to}
                 to={to}
                 className={({ isActive }) =>
-                  `whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition ${isActive ? 'bg-primary-faint text-primary' : 'text-text-secondary hover:bg-surface-low hover:text-text-primary'}`
+                  `whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition ${
+                    isHome
+                      ? isActive
+                        ? 'bg-white/15 text-white'
+                        : 'text-white/80 hover:bg-white/10 hover:text-white'
+                      : isActive
+                        ? 'bg-primary-faint text-primary'
+                        : 'text-text-secondary hover:bg-surface-low hover:text-text-primary'
+                  }`
                 }
               >
                 {label}
@@ -72,9 +104,14 @@ export function AppShell() {
           <div className="ml-auto flex shrink-0 items-center gap-2">
             {user ? (
               <>
+                {!isAdmin ? <>
                 <Link
                   to="/credit"
-                  className="hidden items-center gap-2 rounded-md border border-border bg-white px-2.5 py-2 text-xs font-semibold text-text-secondary transition hover:border-primary/30 hover:bg-primary-faint hover:text-primary sm:flex"
+                  className={`hidden items-center gap-2 rounded-md border px-2.5 py-2 text-xs font-semibold transition sm:flex ${
+                    isHome
+                      ? 'border-white/25 bg-black/10 text-white/90 hover:border-white/50 hover:bg-white/10 hover:text-white'
+                      : 'border-border bg-white text-text-secondary hover:border-primary/30 hover:bg-primary-faint hover:text-primary'
+                  }`}
                 >
                   <Icon name="wallet" className="size-[18px]" />
                   {user.availableCredit} Credit
@@ -84,19 +121,27 @@ export function AppShell() {
                     Đăng đồ
                   </Button>
                 </Link>
+                </> : null}
                 <div className="relative">
                   <button
                     onClick={() => setProfileOpen(!profileOpen)}
-                    className="flex items-center gap-1 rounded-md p-1 transition hover:bg-surface-low"
+                    className={`flex items-center gap-1 rounded-md p-1 transition ${
+                      isHome ? 'hover:bg-white/10' : 'hover:bg-surface-low'
+                    }`}
                     aria-expanded={profileOpen}
                   >
                     <Avatar user={user} />
-                    <Icon name="chevronDown" className="hidden size-4 text-text-muted sm:block" />
+                    <Icon
+                      name="chevronDown"
+                      className={`hidden size-4 sm:block ${
+                        isHome ? 'text-white/75' : 'text-text-muted'
+                      }`}
+                    />
                   </button>
                   {profileOpen ? (
-                    <div className="absolute right-0 top-12 w-60 rounded-lg bg-white p-2 shadow-lg ring-1 ring-border">
+                    <div className="absolute right-0 top-12 w-60 rounded-lg bg-white p-2 text-text-primary shadow-lg ring-1 ring-border">
                       <div className="border-b border-border/70 px-3 py-2.5">
-                        <p className="truncate text-sm font-bold">{user.name}</p>
+                        <p className="truncate text-sm font-bold">{isAdmin ? 'Quản trị viên' : user.name}</p>
                         <p className="mt-0.5 truncate text-xs text-text-muted">{user.email}</p>
                       </div>
                       <Link
@@ -105,24 +150,28 @@ export function AppShell() {
                         className="mt-1 flex items-center gap-2 rounded-md px-3 py-2 text-sm text-text-secondary hover:bg-surface-low"
                       >
                         <Icon name="user" className="size-5" />
-                        Hồ sơ
+                        {isAdmin ? 'Hồ sơ quản trị' : 'Hồ sơ'}
                       </Link>
-                      <Link
+                      {!isAdmin ? <Link
                         to="/credit"
                         onClick={closeMenus}
                         className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-text-secondary hover:bg-surface-low"
                       >
                         <Icon name="wallet" className="size-5" />
                         Credit
+                      </Link> : null}
+                      <Link to="/change-password" onClick={closeMenus} className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-text-secondary hover:bg-surface-low">
+                        <Icon name="shield" className="size-5" />
+                        Đổi mật khẩu
                       </Link>
-                      {user.role === 'admin' ? (
+                      {isAdmin ? (
                         <Link
-                          to="/admin"
+                          to="/profile"
                           onClick={closeMenus}
                           className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-text-secondary hover:bg-surface-low"
                         >
-                          <Icon name="admin" className="size-5" />
-                          Quản trị
+                          <Icon name="user" className="size-5" />
+                          Chỉnh sửa hồ sơ
                         </Link>
                       ) : null}
                       <button
@@ -143,7 +192,11 @@ export function AppShell() {
               <>
                 <Link
                   to="/login"
-                  className="hidden text-sm font-semibold text-text-secondary hover:text-primary sm:block"
+                  className={`hidden text-sm font-semibold sm:block ${
+                    isHome
+                      ? 'text-white/85 hover:text-white'
+                      : 'text-text-secondary hover:text-primary'
+                  }`}
                 >
                   Đăng nhập
                 </Link>
@@ -155,13 +208,17 @@ export function AppShell() {
             <IconButton
               icon={mobileOpen ? 'close' : 'menu'}
               label="Mở điều hướng"
-              className="lg:hidden"
+              className={`lg:hidden ${isHome ? 'text-white hover:bg-white/10' : ''}`}
               onClick={() => setMobileOpen(!mobileOpen)}
             />
           </div>
         </div>
         {mobileOpen ? (
-          <nav className="border-t border-border bg-white px-4 py-3 lg:hidden">
+          <nav
+            className={`border-t px-4 py-3 lg:hidden ${
+              isHome ? 'border-white/15 bg-[#0d332c]/95 text-white' : 'border-border bg-white'
+            }`}
+          >
             {nav.map(([to, label, icon]) => (
               <NavLink
                 end={to === '/'}
@@ -169,14 +226,22 @@ export function AppShell() {
                 to={to}
                 onClick={closeMenus}
                 className={({ isActive }) =>
-                  `flex items-center gap-3 rounded-md px-3 py-3 text-sm font-semibold ${isActive ? 'bg-primary-faint text-primary' : 'text-text-secondary'}`
+                  `flex items-center gap-3 rounded-md px-3 py-3 text-sm font-semibold ${
+                    isHome
+                      ? isActive
+                        ? 'bg-white/15 text-white'
+                        : 'text-white/80'
+                      : isActive
+                        ? 'bg-primary-faint text-primary'
+                        : 'text-text-secondary'
+                  }`
                 }
               >
                 <Icon name={icon} className="size-5" />
                 {label}
               </NavLink>
             ))}
-            {user ? (
+            {user && !isAdmin ? (
               <Link
                 to="/post"
                 onClick={closeMenus}
@@ -193,7 +258,7 @@ export function AppShell() {
         <Outlet />
       </main>
       <footer className="mt-auto border-t border-border bg-white">
-        <div className="mx-auto max-w-[1280px] px-4 pb-8 pt-12 sm:px-6 sm:pt-14 lg:px-8">
+        <div className="mx-auto w-full max-w-[1500px] px-6 pb-8 pt-12 sm:pt-14 md:px-8 lg:px-12 xl:px-14">
           <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-[1.4fr_1fr_1fr_1fr]">
             <div className="max-w-sm">
               <Link to="/" className="inline-flex items-center gap-2.5">
@@ -238,7 +303,6 @@ export function AppShell() {
           </div>
           <div className="mt-12 flex flex-col gap-3 border-t border-border pt-6 text-xs text-text-muted sm:flex-row sm:items-center sm:justify-between">
             <p>© 2026 SHARELOOP</p>
-          
           </div>
         </div>
       </footer>

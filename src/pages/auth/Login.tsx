@@ -1,29 +1,42 @@
 import { type FormEvent, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../../app/hooks';
 import { actions, selectData } from '../../app/store';
 import { Alert, Button, Field, Icon } from '../../components/ui';
+import { PasswordField } from '../../components/PasswordField';
+import { verifyPassword } from '../../utils/passwordSecurity';
 export function Login() {
-  const [username, setUsername] = useState('use');
-  const [password, setPassword] = useState('12345678');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [processing, setProcessing] = useState(false);
   const data = useAppSelector(selectData);
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
-  const login = (name: string, pass: string, target = '/') => {
-    const valid = data.users.find(
-      (u) => u.username === name && u.password === pass && u.status !== 'locked',
-    );
+  const location = useLocation();
+  const successNotice = (location.state as { notice?: string } | null)?.notice;
+  const login = async (name: string, pass: string, target = '/') => {
+    setProcessing(true);
+    const candidate = data.users.find((u) => u.username === name && u.status !== 'locked');
+    const valid = candidate && await verifyPassword(pass, candidate.password) ? candidate : undefined;
     if (!valid) {
       setError('Tên đăng nhập hoặc mật khẩu chưa đúng. Tài khoản bị khóa không thể đăng nhập.');
+      setProcessing(false);
       return;
     }
-    dispatch(actions.login({ username: name, password: pass }));
+    dispatch(actions.login({ username: name, passwordHash: valid.password }));
     navigate(target);
+    setProcessing(false);
   };
   const submit = (e: FormEvent) => {
     e.preventDefault();
     login(username, password);
+  };
+  const quickLogin = (role: 'user' | 'admin') => {
+    setError('');
+    setProcessing(false);
+    dispatch(actions.demoLogin({ username: role, role }));
+    navigate(role === 'admin' ? '/admin' : '/');
   };
   return (
     <div className="page-shell grid min-h-[620px] items-center gap-10 lg:grid-cols-2">
@@ -47,6 +60,7 @@ export function Login() {
             <Alert tone="error">{error}</Alert>
           </div>
         ) : null}
+        {successNotice ? <div className="mt-5"><Alert tone="success">{successNotice}</Alert></div> : null}
         <div className="mt-6 space-y-4">
           <Field
             required
@@ -55,29 +69,25 @@ export function Login() {
             onChange={(e) => setUsername(e.target.value)}
             autoComplete="username"
           />
-          <Field
-            required
-            label="Mật khẩu"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="current-password"
-          />
-          <Button className="w-full">Đăng nhập</Button>
+          <PasswordField label="Mật khẩu" value={password} onChange={setPassword} autoComplete="current-password" />
+          <Button className="w-full" disabled={processing}>Đăng nhập</Button>
         </div>
+        <Link to="/forgot-password" className="mt-4 block text-center text-sm font-semibold text-primary hover:underline">
+          Quên mật khẩu?
+        </Link>
         <div className="my-6 flex items-center gap-3 text-xs text-text-muted">
           <span className="h-px flex-1 bg-border" />
           <span>Tài khoản demo</span>
           <span className="h-px flex-1 bg-border" />
         </div>
         <div className="grid grid-cols-2 gap-2">
-          <Button type="button" variant="outline" onClick={() => login('use', '12345678')}>
+          <Button type="button" variant="outline" onClick={() => quickLogin('user')}>
             Người dùng
           </Button>
           <Button
             type="button"
             variant="outline"
-            onClick={() => login('admin', '12345678', '/admin')}
+            onClick={() => quickLogin('admin')}
           >
             Quản trị viên
           </Button>

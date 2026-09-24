@@ -48,7 +48,7 @@ function FilterBar({ children }: { children: ReactNode }) {
 
 export function AdminDashboard() {
   const data = useAppSelector(selectData);
-  const pending = data.items.filter((i) => i.status === 'pending');
+  const pending = data.items.filter((i) => i.status === 'pending' || i.status === 'PENDING_REVIEW' || i.status === 'VIOLATION');
   const activeTx = data.transactions.filter((t) => !['COMPLETED', 'CANCELLED'].includes(t.status));
   return (
     <Panel
@@ -137,8 +137,9 @@ export function AdminModeration() {
   const [query, setQuery] = useState('');
   const [rejecting, setRejecting] = useState<Item | null>(null);
   const [toast, setToast] = useState('');
+  const [checklist, setChecklist] = useState<Record<string, boolean>>({});
   const rows = data.items
-    .filter((i) => i.status === 'pending')
+    .filter((i) => i.status === 'pending' || i.status === 'PENDING_REVIEW' || i.status === 'VIOLATION')
     .filter((i) => i.title.toLowerCase().includes(query.toLowerCase()));
   return (
     <Panel
@@ -182,6 +183,10 @@ export function AdminModeration() {
                 </p>
               </div>
               <div className="flex gap-2">
+                <label className="flex items-center gap-1 text-[11px] text-text-muted">
+                  <input type="checkbox" checked={checklist[item.id] ?? false} onChange={(event) => setChecklist((current) => ({ ...current, [item.id]: event.target.checked }))} />
+                  Checklist: nội dung, ảnh, danh mục hợp lệ
+                </label>
                 <Button
                   size="sm"
                   variant="danger"
@@ -200,6 +205,7 @@ export function AdminModeration() {
                       }),
                     )
                   }
+                  disabled={!checklist[item.id]}
                 >
                   Duyệt bài
                 </Button>
@@ -828,7 +834,7 @@ export function AdminSettings() {
             label="Phí giao dịch (Credit)"
             value={fee}
             onChange={(e) => setFee(Number(e.target.value))}
-            hint="Swap: 200 mỗi bên. Give: người nhận 400."
+            hint="Swap: 2 mỗi bên. Give: người nhận 4."
           />
           <Field
             type="number"
@@ -839,7 +845,7 @@ export function AdminSettings() {
           />
         </div>
         <div className="mt-5 rounded-md bg-primary-faint p-4 text-sm text-text-secondary">
-          1 Credit = 1 VND. Swap thu 200 Credit mỗi bên; Give thu 400 Credit từ người nhận.
+          1 Credit = 1.000đ. Swap thu 2 Credit mỗi bên; Give thu 4 Credit từ người nhận.
         </div>
         <Button
           className="mt-5"
@@ -1128,6 +1134,8 @@ function AdminComplaints() {
     received: 'Đã tiếp nhận',
     processing: 'Đang xử lý',
     resolved: 'Đã xử lý',
+    rejected: 'Đã bác bỏ khiếu nại',
+    violation_confirmed: 'Đã xác nhận vi phạm',
   };
   return (
     <Panel title="Khiếu nại" description="Hồ sơ giao dịch cần quản trị viên xem xét và xử lý.">
@@ -1202,14 +1210,22 @@ function AdminComplaints() {
               </Button>
             ) : null}
             {selected.status === 'processing' ? (
+              <>
+              <Button variant="outline" onClick={() => {
+                dispatch(actions.updateComplaintStatus({ adminId: admin.id, complaintId: selected.id, status: 'rejected', adminNote: note, resolution }));
+                setSelectedId('');
+              }}>
+                Bác bỏ khiếu nại
+              </Button>
               <Button
                 onClick={() => {
-                  dispatch(actions.updateComplaintStatus({ adminId: admin.id, complaintId: selected.id, status: 'resolved', adminNote: note, resolution }));
+                  dispatch(actions.updateComplaintStatus({ adminId: admin.id, complaintId: selected.id, status: 'violation_confirmed', adminNote: note, resolution }));
                   setSelectedId('');
                 }}
               >
                 Đánh dấu đã xử lý
               </Button>
+              </>
             ) : null}
           </div>
         </Modal>

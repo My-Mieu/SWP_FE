@@ -3,6 +3,8 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../../app/hooks';
 import { actions, selectData } from '../../app/store';
 import { Button, Field, Select } from '../../components/ui';
+import { PasswordField } from '../../components/PasswordField';
+import { hashPassword, passwordRules, validatePassword } from '../../utils/passwordSecurity';
 export function Register() {
   const data = useAppSelector(selectData);
   const districts = data.districts
@@ -13,16 +15,25 @@ export function Register() {
   const [username, setUsername] = useState('');
   const [phone, setPhone] = useState('');
   const [district, setDistrict] = useState<string>(districts[0] ?? '');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [error, setError] = useState('');
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
-  const submit = (e: FormEvent) => {
+  const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (step === 'details') {
+      const errors = validatePassword(password);
+      if (errors.length || password !== confirmPassword) {
+        setError(errors[0] ?? passwordRules.mismatch);
+        return;
+      }
       setStep('otp');
       return;
     }
-    dispatch(actions.register({ name, username, password: '12345678', phone, district }));
+    const passwordHash = await hashPassword(password);
+    dispatch(actions.register({ name, username, passwordHash, phone, district }));
     navigate('/');
   };
   return (
@@ -75,6 +86,8 @@ export function Register() {
                 <option key={d}>{d}</option>
               ))}
             </Select>
+            <PasswordField label="Mật khẩu" value={password} onChange={setPassword} autoComplete="new-password" error={error} />
+            <PasswordField label="Xác nhận mật khẩu" value={confirmPassword} onChange={setConfirmPassword} autoComplete="new-password" />
             <Button className="w-full">Tiếp tục</Button>
           </div>
         ) : (

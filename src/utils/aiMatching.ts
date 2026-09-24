@@ -96,7 +96,7 @@ export function findNeedMatches(
   const tokens = tokensOf(text);
 
   return items
-    .filter((item) => item.status === 'approved')
+    .filter((item) => item.status === 'approved' || item.status === 'APPROVED')
     .filter((item) => !parsed.district || item.district === parsed.district)
     .filter((item) => !parsed.type || item.type === parsed.type)
     .filter((item) => !parsed.category || item.category === parsed.category)
@@ -117,7 +117,7 @@ export function getSwapSuggestions(
 
   return items
     .filter((item) => item.type === 'trade')
-    .filter((item) => item.status === 'approved')
+    .filter((item) => item.status === 'approved' || item.status === 'APPROVED')
     .filter((item) => item.id !== sourceItem.id)
     .filter((item) => item.ownerId !== currentUserId)
     .map((item) => {

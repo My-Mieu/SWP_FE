@@ -13,18 +13,21 @@ import {
   Stat,
 } from '../../components/ui';
 import { formatCredit, formatVnd } from '../../utils/formatting';
+import { CREDIT_TO_VND } from '../../utils/credit';
 import { fileToDataUrl } from '../../utils/files';
+import { ChangePasswordForm } from '../../components/ChangePasswordForm';
 export function Profile() {
   const user = useAppSelector(selectCurrentUser)!;
+  const isAdmin = user.role === 'admin';
   const data = useAppSelector(selectData);
   const dispatch = useAppDispatch();
-  const [tab, setTab] = useState<'profile' | 'credit' | 'reputation'>('profile');
+  const [tab, setTab] = useState<'profile' | 'credit' | 'reputation' | 'password'>('profile');
   const [avatarUrl, setAvatarUrl] = useState(user.avatarUrl);
   const [name, setName] = useState(user.name);
   const [email, setEmail] = useState(user.email);
   const [phone, setPhone] = useState(user.phone);
   const [district, setDistrict] = useState(user.district);
-  const [amount, setAmount] = useState(5000);
+  const [amount, setAmount] = useState(5);
   const [showQr, setShowQr] = useState(false);
   const history = data.creditHistory.filter((h) => h.userId === user.id);
   const topups = data.topups.filter((t) => t.userId === user.id);
@@ -54,11 +57,12 @@ export function Profile() {
             {(
               [
                 ['profile', 'Hồ sơ', 'user'],
+                ['password', 'Đổi mật khẩu', 'shield'],
                 ['credit', 'Credit', 'wallet'],
                 ['reputation', 'Uy tín & Hạng', 'star'],
               ] as const
             ).map(([id, label, icon]) =>
-              id === 'credit' ? (
+              id === 'credit' && !isAdmin ? (
                 <Link
                   key={id}
                   to="/credit"
@@ -67,7 +71,7 @@ export function Profile() {
                   <Icon name={icon} className="size-5" />
                   {label}
                 </Link>
-              ) : (
+              ) : id === 'credit' ? null : isAdmin && id === 'reputation' ? null : (
                 <button
                   key={id}
                   onClick={() => setTab(id)}
@@ -78,6 +82,10 @@ export function Profile() {
                 </button>
               ),
             )}
+            <Link to="/change-password" className="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm font-semibold text-text-secondary hover:bg-surface-low">
+              <Icon name="shield" className="size-5" />
+              Đổi mật khẩu
+            </Link>
           </nav>
         </aside>
         <main className="min-w-0">
@@ -150,17 +158,17 @@ export function Profile() {
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <h2 className="section-title">Nạp Credit</h2>
-                      <p className="mt-1 text-xs text-text-muted">1 VND = 1 Credit</p>
+                <p className="mt-1 text-xs text-text-muted">1 Credit = 1.000đ</p>
                     </div>
                   </div>
                   <div className="mt-4 grid grid-cols-3 gap-2 sm:grid-cols-6">
-                    {[1000, 2000, 5000, 10000, 20000].map((v) => (
+                    {[1, 2, 5, 10, 20].map((v) => (
                       <button
                         key={v}
                         onClick={() => setAmount(v)}
                         className={`rounded-md border px-2 py-2.5 text-xs font-semibold ${amount === v ? 'border-primary bg-primary-faint text-primary' : 'border-border text-text-secondary hover:border-primary/40'}`}
                       >
-                        {formatVnd(v)}
+                        {v} Credit · {formatVnd(v * CREDIT_TO_VND)}
                       </button>
                     ))}
                   </div>
@@ -178,7 +186,7 @@ export function Profile() {
                         ))}
                       </div>
                       <div>
-                        <h3 className="font-bold">Chuyển khoản {formatVnd(amount)}</h3>
+                        <h3 className="font-bold">Chuyển khoản {formatVnd(amount * CREDIT_TO_VND)}</h3>
                         <p className="mt-2 text-sm leading-6 text-text-muted">
                           Nội dung:{' '}
                           <strong className="text-text-primary">SHARELOOP {user.id}</strong>
@@ -189,7 +197,7 @@ export function Profile() {
                         <Button
                           className="mt-4"
                           onClick={() => {
-                            dispatch(actions.topupCredit({ userId: user.id, vnd: amount }));
+                            dispatch(actions.topupCredit({ userId: user.id, vnd: amount * CREDIT_TO_VND }));
                             setShowQr(false);
                           }}
                         >
@@ -242,6 +250,7 @@ export function Profile() {
               </section>
             </div>
           ) : null}
+          {tab === 'password' ? <ChangePasswordForm user={user} /> : null}
           {tab === 'reputation' ? (
             <div className="space-y-6">
               <section className="grid gap-5 rounded-xl bg-white p-6 ring-1 ring-border/80 sm:grid-cols-3">

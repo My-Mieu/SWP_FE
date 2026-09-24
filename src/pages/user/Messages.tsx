@@ -1,4 +1,4 @@
-import { useMemo, useState, type Dispatch, type SetStateAction } from 'react';
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { useAppDispatch, useAppSelector } from '../../app/hooks';
 import { actions, selectCurrentUser, selectData } from '../../app/store';
 import {
@@ -18,6 +18,7 @@ import { progressIndex } from '../../utils/transaction';
 import type { AppDispatch } from '../../app/store';
 import type { Handover, Item, Transaction } from '../../types/domain';
 import { fileToDataUrl } from '../../utils/files';
+import { classifyAmbiguousContact, contactSafetyLayer1 } from '../../utils/contactSafety';
 
 const steps = ['Trao doi', 'De xuat lich', 'Chot lich', 'Giu phi', 'Ban giao', 'Hoan tat'];
 export function Messages() {
@@ -43,6 +44,7 @@ export function Messages() {
   const [complaintReason, setComplaintReason] = useState('');
   const [complaintContent, setComplaintContent] = useState('');
   const [complaintEvidence, setComplaintEvidence] = useState<string[]>([]);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   const districts = data.districts
     .filter((entry) => entry.status === 'active')
     .map((entry) => entry.name);
@@ -59,10 +61,22 @@ export function Messages() {
     () => data.messages.filter((m) => m.convId === selectedId),
     [data.messages, selectedId],
   );
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [selectedId, messages.length]);
   const handover = data.handovers.find((h) => h.id === tx?.handoverId);
-  const send = () => {
+  const send = async () => {
     if (!message.trim() || !conv) return;
-    dispatch(actions.sendMessage({ convId: conv.id, sender: user.id, text: message.trim() }));
+    const text = message.trim();
+    if (!tx?.creditHeld && !contactSafetyLayer1(text).blocked) {
+      const suspicious = await classifyAmbiguousContact(text);
+      if (suspicious) {
+        dispatch(actions.sendMessage({ convId: conv.id, sender: user.id, text }));
+        setMessage('');
+        return;
+      }
+    }
+    dispatch(actions.sendMessage({ convId: conv.id, sender: user.id, text }));
     setMessage('');
   };
   const select = (id: string) => {
@@ -109,12 +123,12 @@ export function Messages() {
   return (
     <div className="page-shell py-5 sm:py-7">
       <div className="overflow-hidden rounded-xl bg-white shadow-md ring-1 ring-border/80 lg:grid lg:h-[calc(100dvh-140px)] lg:min-h-[680px] lg:grid-cols-[330px_1fr]">
-        <aside className={`${mobileChat ? 'hidden lg:block' : 'block'} border-r border-border`}>
+        <aside className={`${mobileChat ? 'hidden lg:flex' : 'flex'} min-h-0 flex-col overflow-hidden border-r border-border`}>
           <div className="flex h-16 items-center justify-between border-b border-border px-5">
             <h1 className="text-lg font-bold">Tin nhắn</h1>
             <span className="text-xs text-text-muted">{conversations.length} cuộc trò chuyện</span>
           </div>
-          <div className="max-h-[calc(100dvh-210px)] overflow-y-auto">
+          <div className="min-h-0 flex-1 overflow-y-auto">
             {conversations.map((c) => {
               const cTx = data.transactions.find((t) => t.id === c.transactionId);
               const txItem = data.items.find((i) => i.id === c.itemId);
@@ -153,9 +167,9 @@ export function Messages() {
         </aside>
         {conv && tx && item ? (
           <section
-            className={`${mobileChat ? 'grid' : 'hidden lg:grid'} min-h-[680px] grid-rows-[auto_auto_1fr_auto] lg:min-h-0`}
+            className={`${mobileChat ? 'flex' : 'hidden lg:flex'} min-h-[680px] flex-col overflow-hidden lg:min-h-0`}
           >
-            <header className="flex h-16 items-center gap-3 border-b border-border px-4 sm:px-5">
+            <header className="flex h-16 shrink-0 items-center gap-3 border-b border-border px-4 sm:px-5">
               <IconButton
                 icon="arrow"
                 label="Quay lại"
@@ -172,7 +186,7 @@ export function Messages() {
               </div>
               <StatusBadge status={tx.status} />
             </header>
-            <div className="border-b border-border bg-background/70">
+            <div className="shrink-0 border-b border-border bg-background/70">
               <button
                 onClick={() => setShowContext(!showContext)}
                 className="flex w-full items-center justify-between px-4 py-3 text-left sm:px-5"
@@ -215,7 +229,17 @@ export function Messages() {
                 />
               ) : null}
             </div>
-            <div className="space-y-3 overflow-y-auto bg-background px-4 py-5 sm:px-6">
+            {!tx.creditHeld ? (
+              <div className="shrink-0 border-b border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-900 sm:px-6">
+                🔒 Thông tin liên hệ đang được bảo vệ.<br />
+                Số điện thoại, email và đường dẫn chỉ được phép sau khi cả hai xác nhận lịch hẹn.
+              </div>
+            ) : (
+              <div className="shrink-0 border-b border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-semibold text-emerald-800 sm:px-6">
+                🔓 Thông tin liên hệ đã được mở khóa sau khi cả hai xác nhận lịch hẹn.
+              </div>
+            )}
+            <div className="min-h-0 flex-1 space-y-3 overflow-x-hidden overflow-y-auto bg-background px-4 pb-6 pt-5 sm:px-6">
               {messages.map((msg) => {
                 const mine = msg.sender === user.id;
                 if (msg.sender === 'system')
@@ -248,13 +272,14 @@ export function Messages() {
                   </div>
                 );
               })}
+              <div ref={messagesEndRef} aria-hidden="true" />
             </div>
             <form
               onSubmit={(e) => {
                 e.preventDefault();
                 send();
               }}
-              className="flex items-end gap-2 border-t border-border bg-white p-3 sm:p-4"
+              className="relative bottom-auto z-10 flex shrink-0 items-end gap-2 border-t border-border bg-white p-3 sm:p-4"
             >
               <Field
                 className="h-11"

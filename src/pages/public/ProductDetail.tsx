@@ -32,12 +32,15 @@ export function ProductDetail() {
   const request = () => {
     if (!user) navigate('/login');
     else if (!own) {
-      if (user.availableCredit < requiredCredit) {
-        setCreditError(
-          item.type === 'gift'
-            ? `Ban can it nhat ${feeLabel(requiredCredit)} de nhan mon do nay.`
-            : `Ban can it nhat ${feeLabel(requiredCredit)} de tham gia giao dich nay.`,
-        );
+      if (user.reputationStars <= 0) {
+        setCreditError('Uy tín của bạn đang ở mức 0 nên hiện không thể gửi yêu cầu nhận hoặc trao đổi.');
+        return;
+      }
+      if (
+        user.availableCredit < requiredCredit ||
+        (item.type === 'trade' && owner.availableCredit < requiredCredit)
+      ) {
+        setCreditError('Bạn không đủ Credit để thực hiện thao tác này.');
         return;
       }
       dispatch(actions.createTransaction({ itemId: item.id, requesterId: user.id }));
@@ -106,7 +109,7 @@ export function ProductDetail() {
             <Button
               className="mt-5 w-full"
               size="lg"
-              disabled={own || item.status !== 'approved'}
+              disabled={own || (item.status !== 'approved' && item.status !== 'APPROVED')}
               onClick={request}
             >
               {own
@@ -129,7 +132,7 @@ export function ProductDetail() {
                   variant="outline"
                   onClick={() => navigate('/credit')}
                 >
-                  Nap Credit
+                  Nạp Credit
                 </Button>
               </div>
             ) : null}

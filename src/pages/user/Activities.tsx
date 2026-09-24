@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../../app/hooks';
 import { actions, selectCurrentUser, selectData } from '../../app/store';
 import {
+  Alert,
   Button,
   ConditionBadge,
   EmptyState,
@@ -15,6 +16,7 @@ import {
 } from '../../components/ui';
 import { getSwapSuggestions } from '../../utils/aiMatching';
 import { conditionLabel } from '../../utils/formatting';
+import { AI_SWAP_MATCHING_FEE } from '../../utils/credit';
 
 export function Activities() {
   const data = useAppSelector(selectData);
@@ -26,6 +28,7 @@ export function Activities() {
   const [suggestionSourceId, setSuggestionSourceId] = useState('');
   const [draftTitle, setDraftTitle] = useState('');
   const [draftDescription, setDraftDescription] = useState('');
+  const [creditError, setCreditError] = useState('');
   const myItems = data.items.filter((i) => i.ownerId === user.id);
   const suggestionSource = myItems.find((item) => item.id === suggestionSourceId);
   const swapSuggestions = useMemo(
@@ -37,6 +40,17 @@ export function Activities() {
   );
   const txs = data.transactions.filter((t) => t.ownerId === user.id || t.requesterId === user.id);
   const sendSwapRequest = (sourceItemId: string, targetItemId: string) => {
+    if (user.reputationStars <= 0) {
+      setCreditError('Uy tín của bạn đang ở mức 0 nên hiện không thể gửi yêu cầu trao đổi.');
+      return;
+    }
+    const target = data.items.find((item) => item.id === targetItemId);
+    const owner = target ? data.users.find((entry) => entry.id === target.ownerId) : undefined;
+    if (user.availableCredit < 2 || !owner || owner.availableCredit < 2) {
+      setCreditError('Bạn không đủ Credit để thực hiện thao tác này.');
+      return;
+    }
+    setCreditError('');
     dispatch(actions.createTransaction({ itemId: targetItemId, requesterId: user.id, sourceItemId }));
     navigate('/messages');
   };
@@ -51,6 +65,14 @@ export function Activities() {
           </Link>
         }
       />
+      {creditError ? (
+        <Alert tone="error">
+          <p>{creditError}</p>
+          <Button className="mt-2" size="sm" variant="outline" onClick={() => navigate('/credit')}>
+            Nạp Credit
+          </Button>
+        </Alert>
+      ) : null}
       <div className="mb-6 flex gap-1 border-b border-border">
         <button
           onClick={() => setTab('items')}
@@ -70,7 +92,7 @@ export function Activities() {
           {myItems.length ? (
             <div className="space-y-3">
               {myItems.map((item) => {
-                const canUseAiSwap = item.type === 'trade' && item.status === 'approved';
+                const canUseAiSwap = item.type === 'trade' && (item.status === 'approved' || item.status === 'APPROVED');
                 const isSuggestionOpen = suggestionSourceId === item.id;
 
                 return (
@@ -96,9 +118,9 @@ export function Activities() {
                           Hết hạn {new Date(item.expiresAt).toLocaleDateString('vi-VN')} ·{' '}
                           {item.district}
                         </p>
-                        {item.status === 'rejected' && item.rejectionReason ? (
+                        {(item.status === 'rejected' || item.status === 'REJECTED' || item.status === 'VIOLATION') && (item.rejectionReason || item.moderationReason) ? (
                           <p className="mt-2 rounded-md bg-red-50 px-3 py-2 text-xs leading-5 text-error">
-                            Lý do từ chối: {item.rejectionReason}
+                            Lý do kiểm duyệt: {item.rejectionReason ?? item.moderationReason}
                           </p>
                         ) : null}
                       </div>
@@ -121,6 +143,11 @@ export function Activities() {
                             variant="ghost"
                             icon="ai"
                             onClick={() => {
+                              if (!isSuggestionOpen && user.availableCredit < AI_SWAP_MATCHING_FEE) {
+                                setCreditError('Bạn không đủ Credit để thực hiện thao tác này.');
+                                return;
+                              }
+                              setCreditError('');
                               if (!isSuggestionOpen)
                                 dispatch(
                                   actions.useAiFeature({

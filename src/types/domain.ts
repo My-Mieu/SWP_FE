@@ -2,7 +2,16 @@ export type Role = 'guest' | 'user' | 'admin';
 export type UserStatus = 'active' | 'suspended' | 'locked';
 export type ItemType = 'gift' | 'trade';
 export type ItemCondition = 'new' | 'good' | 'used';
-export type ItemStatus = 'pending' | 'approved' | 'rejected' | 'expired' | 'removed';
+export type ItemStatus =
+  | 'pending'
+  | 'PENDING_REVIEW'
+  | 'approved'
+  | 'APPROVED'
+  | 'rejected'
+  | 'REJECTED'
+  | 'VIOLATION'
+  | 'expired'
+  | 'removed';
 export type TransactionStatus =
   | 'NEGOTIATING'
   | 'SCHEDULE_PROPOSED'
@@ -16,6 +25,7 @@ export type TransactionStatus =
   | 'DISPUTED';
 export type CreditHistoryType =
   | 'TOPUP'
+  | 'TRANSACTION_FEE'
   | 'SPEND'
   | 'HOLD'
   | 'REFUND'
@@ -24,7 +34,7 @@ export type CreditHistoryType =
   | 'ADMIN_ADJUSTMENT';
 export type CreditHistoryStatus = 'completed' | 'holding' | 'refunded' | 'pending';
 export type KeywordAction = 'flag' | 'block';
-export type ComplaintStatus = 'received' | 'processing' | 'resolved';
+export type ComplaintStatus = 'received' | 'processing' | 'resolved' | 'rejected' | 'violation_confirmed';
 
 export interface User {
   id: string;
@@ -61,6 +71,7 @@ export interface Item {
   tradeFor?: string;
   status: ItemStatus;
   rejectionReason?: string;
+  moderationReason?: string;
   postedAt: string;
   expiresAt: string;
 }
@@ -91,6 +102,7 @@ export interface Transaction {
   handoverId?: string;
   creditHeldBy: string[];
   creditHeld?: boolean;
+  feeCharged?: boolean;
   feeCaptured?: boolean;
   ownerScheduleConfirmed?: boolean;
   requesterScheduleConfirmed?: boolean;
@@ -280,4 +292,17 @@ export interface AppStateData {
   pointHistory: ReputationPointHistory[];
   auditLogs: AdminAuditLog[];
   settings: SystemSetting[];
+  passwordReset?: PasswordResetState;
+}
+
+export interface PasswordResetState {
+  id: string;
+  email: string;
+  userId?: string;
+  otpHash: string;
+  expiresAt: string;
+  resendAvailableAt: string;
+  attempts: number;
+  verified: boolean;
+  resetToken?: string;
 }

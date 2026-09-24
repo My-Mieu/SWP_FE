@@ -31,7 +31,7 @@ export function Browse() {
   const results = useMemo(
     () =>
       items
-        .filter((i) => i.status === 'approved')
+        .filter((i) => i.status === 'approved' || i.status === 'APPROVED')
         .filter((i) => !q || `${i.title} ${i.description}`.toLowerCase().includes(q.toLowerCase()))
         .filter((i) => !type || i.type === type)
         .filter((i) => !category || i.category === category)

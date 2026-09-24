@@ -138,9 +138,29 @@ export function loadPersistedState(): AppStateData {
     parsed.pointRules = parsed.pointRules ?? seedPointRules;
     parsed.pointHistory = parsed.pointHistory ?? seedPointHistory;
     parsed.creditHistory = normalizeCreditHistory(parsed);
-    parsed.users = (parsed.users ?? []).map((user) =>
-      user.role === 'admin' ? user : { ...user, rank: rankFor(user.rewardPoints, parsed.ranks) },
-    );
+    const demoHistory = parsed.creditHistory.filter((entry) => entry.userId === 'user_001');
+    if (demoHistory.some((entry) => entry.amount === 5000 || entry.amount === -200 || entry.type === 'HOLD')) {
+      parsed.creditHistory = [
+        ...seedCreditHistory.filter((entry) => entry.userId === 'user_001'),
+        ...parsed.creditHistory.filter((entry) => entry.userId !== 'user_001'),
+      ];
+      parsed.topups = (parsed.topups ?? []).filter((topup) => topup.userId !== 'user_001');
+    }
+    parsed.users = (parsed.users ?? []).map((user) => {
+      // Older demo data used the typo "use" for the seeded demo user.
+      const normalizedUser = user.id === 'user_001' && user.username === 'use'
+        ? { ...user, username: 'user' }
+        : user;
+      const demoWalletUser = normalizedUser.id === 'user_001' &&
+        normalizedUser.totalCredit >= 11996 &&
+        normalizedUser.availableCredit >= 11796 &&
+        normalizedUser.holdCredit === 200
+        ? { ...normalizedUser, totalCredit: 20, availableCredit: 20, holdCredit: 0 }
+        : normalizedUser;
+      return demoWalletUser.role === 'admin'
+        ? demoWalletUser
+        : { ...demoWalletUser, rank: rankFor(demoWalletUser.rewardPoints, parsed.ranks) };
+    });
     return parsed;
   } catch {
     return initialData;
